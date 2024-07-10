@@ -1,29 +1,17 @@
 // SpidersMod.java
 package com.horrormods.spiders;
 
-import com.horrormods.spiders.init.ModEntities;
-import net.minecraftforge.common.MinecraftForge;
+import com.horrormods.spiders.registry.EntityRegistry;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
-@Mod(Spiders.MODID)
+@Mod(Spiders.ModID)
 public class Spiders {
-    public static final String MODID = "spiders";
+    public static final String ModID = "spiders";
 
     public Spiders() {
-        IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
-        ModEntities.register(modEventBus);
-        modEventBus.addListener(this::clientSetup);
-        modEventBus.addListener(ModEntities::registerEntityAttributes);
-        MinecraftForge.EVENT_BUS.register(this);
+        IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
+        EntityRegistry.ENTITIES.register(bus);
     }
-
-    private void clientSetup(final FMLClientSetupEvent event) {
-        event.enqueueWork(() -> {
-
-        });
-    }
-
 }
