@@ -1,5 +1,6 @@
 package com.horrormods.spiders.entity;
 
+import com.horrormods.spiders.entity.ai.AdvancedClimberPathNavigator;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.AgeableMob;
 import net.minecraft.world.entity.EntityType;
@@ -7,6 +8,7 @@ import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
+import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
@@ -49,6 +51,11 @@ public class GroundSpiderEntity extends Animal implements IAnimatable {
             event.getController().setAnimation(new AnimationBuilder().addAnimation("idle", ILoopType.EDefaultLoopTypes.LOOP));
         }
         return PlayState.CONTINUE;
+    }
+
+    @Override
+    protected PathNavigation createNavigation(Level pLevel) {
+        return new AdvancedClimberPathNavigator(this, pLevel, true, true);
     }
 
     @Override

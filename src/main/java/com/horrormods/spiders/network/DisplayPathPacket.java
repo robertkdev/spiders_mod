@@ -1,8 +1,7 @@
 package com.horrormods.spiders.network;
 
-import net.minecraft.client.Minecraft;
+import com.horrormods.spiders.client.ClientPathManager; // NEW Import
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -24,20 +23,11 @@ public class DisplayPathPacket {
         buf.writeCollection(this.pathNodes, FriendlyByteBuf::writeBlockPos);
     }
 
-    // This method is now STATIC and takes the packet as the first parameter
+    // UPDATED: This method now just passes the path to the manager.
+    // The ClientListener will handle the actual drawing.
     public static void handle(DisplayPathPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
-            // Make sure we are on the client
-            if (Minecraft.getInstance().level != null) {
-                // Use the 'packet' parameter to get the list of nodes
-                for (BlockPos pos : packet.pathNodes) {
-                    Minecraft.getInstance().level.addParticle(ParticleTypes.FLAME,
-                            pos.getX() + 0.5,
-                            pos.getY() + 0.5,
-                            pos.getZ() + 0.5,
-                            0, 0, 0);
-                }
-            }
+            ClientPathManager.setPath(packet.pathNodes);
         });
         ctx.get().setPacketHandled(true);
     }

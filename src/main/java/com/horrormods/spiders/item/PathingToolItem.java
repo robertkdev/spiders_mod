@@ -4,6 +4,7 @@ import com.horrormods.spiders.entity.GroundSpiderEntity;
 import com.horrormods.spiders.network.DisplayPathPacket;
 import com.horrormods.spiders.network.PacketHandler;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction; // NEW Import
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -21,9 +22,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class PathingToolItem extends Item {
-    // We use static fields to store the positions between uses
     private static BlockPos startPos;
     private static BlockPos endPos;
+    private static Direction startFace; // NEW: Store the face of the starting block
 
     public PathingToolItem(Properties pProperties) {
         super(pProperties);
@@ -32,7 +33,6 @@ public class PathingToolItem extends Item {
     @Override
     public InteractionResult useOn(UseOnContext pContext) {
         Level level = pContext.getLevel();
-        // Logic should only run on the server
         if (level.isClientSide()) {
             return InteractionResult.SUCCESS;
         }
@@ -41,8 +41,7 @@ public class PathingToolItem extends Item {
         BlockPos clickedPos = pContext.getClickedPos();
 
         if (player.isShiftKeyDown()) {
-            // SHIFT + RIGHT-CLICK: Set the end point and trigger pathfinding
-            endPos = clickedPos.above(); // Use .above() so the spider paths to the block's surface
+            endPos = clickedPos;
             player.sendSystemMessage(Component.literal("End point set at: " + posToString(endPos)));
 
             if (startPos != null) {
@@ -51,10 +50,9 @@ public class PathingToolItem extends Item {
                 player.sendSystemMessage(Component.literal("Set a start point first!"));
             }
         } else {
-            // RIGHT-CLICK: Set the start point
-            startPos = clickedPos.above();
-            player.sendSystemMessage(Component.literal("Start point set at: " + posToString(startPos)));
-            // Optional: Draw a particle at the start point
+            startPos = clickedPos;
+            startFace = pContext.getClickedFace(); // NEW: Store the direction of the clicked face
+            player.sendSystemMessage(Component.literal("Start point set at: " + posToString(startPos) + " on face " + startFace));
             ((ServerLevel) level).sendParticles(ParticleTypes.HAPPY_VILLAGER, startPos.getX() + 0.5, startPos.getY() + 0.5, startPos.getZ() + 0.5, 20, 0, 0, 0, 0);
         }
 
@@ -62,18 +60,11 @@ public class PathingToolItem extends Item {
     }
 
     private void findPath(ServerLevel level, Player player) {
-        // These are the conditions for finding our spider. forNonCombat() is a good default.
         TargetingConditions targetConditions = TargetingConditions.forNonCombat().ignoreLineOfSight();
-
-        // Find the closest ground spider to the start position using the correct arguments
         GroundSpiderEntity spider = level.getNearestEntity(
-                GroundSpiderEntity.class,
-                targetConditions, // Use the TargetingConditions object here
-                null, // No specific living entity target
-                startPos.getX(),
-                startPos.getY(),
-                startPos.getZ(),
-                player.getBoundingBox().inflate(64.0D) // Search in a 64-block radius
+                GroundSpiderEntity.class, targetConditions, null,
+                startPos.getX(), startPos.getY(), startPos.getZ(),
+                player.getBoundingBox().inflate(64.0D)
         );
 
         if (spider == null) {
@@ -81,11 +72,13 @@ public class PathingToolItem extends Item {
             return;
         }
 
-        // --- The rest of the method is the same ---
-        spider.teleportTo(startPos.getX() + 0.5, startPos.getY(), startPos.getZ() + 0.5);
-        Path path = spider.getNavigation().createPath(endPos, 0);
+        // --- FIX: Teleport the spider to the air block adjacent to the clicked face ---
+        BlockPos teleportPos = startPos.relative(startFace);
+        spider.teleportTo(teleportPos.getX() + 0.5, teleportPos.getY() + 0.5, teleportPos.getZ() + 0.5);
 
-        if (path != null && !path.isDone()) {
+        Path path = spider.getNavigation().createPath(endPos, 128);
+
+        if (path != null && path.getNodeCount() > 1) {
             player.sendSystemMessage(Component.literal("Path found! Length: " + path.getNodeCount()));
 
             List<BlockPos> pathNodes = new ArrayList<>();
@@ -94,8 +87,8 @@ public class PathingToolItem extends Item {
             }
 
             PacketHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> (ServerPlayer) player), new DisplayPathPacket(pathNodes));
-
         } else {
+            // This already prints a message in-game if a path isn't found
             player.sendSystemMessage(Component.literal("Could not find a path to the end point."));
             level.sendParticles(ParticleTypes.SMOKE, endPos.getX() + 0.5, endPos.getY() + 0.5, endPos.getZ() + 0.5, 20, 0, 0, 0, 0);
         }
