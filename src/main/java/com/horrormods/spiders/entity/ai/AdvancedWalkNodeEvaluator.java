@@ -2,23 +2,49 @@ package com.horrormods.spiders.entity.ai;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.PathNavigationRegion;
 import net.minecraft.world.level.pathfinder.BlockPathTypes;
 import net.minecraft.world.level.pathfinder.Node;
-import net.minecraft.world.level.pathfinder.Target;
 import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
 import net.minecraft.world.phys.AABB;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 public class AdvancedWalkNodeEvaluator extends WalkNodeEvaluator {
 
     private final EnumSet<Direction> allowedDirections = EnumSet.of(Direction.DOWN);
-    private static final Direction[] HORIZONTAL_DIRECTIONS = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
+
+    public static class CustomNode extends Node {
+        public Direction attachment;
+        public double g = Double.MAX_VALUE;
+        public double h;
+        public CustomNode parent;
+
+        public CustomNode(int x, int y, int z) {
+            super(x, y, z);
+        }
+
+        public double distanceTo(CustomNode other) {
+            double dx = this.x - other.x;
+            double dy = this.y - other.y;
+            double dz = this.z - other.z;
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        public float distanceManhattan(CustomNode other) {
+            float dx = Math.abs(this.x - other.x);
+            float dy = Math.abs(this.y - other.y);
+            float dz = Math.abs(this.z - other.z);
+            return dx + dy + dz;
+        }
+    }
 
     public void setCanPathWalls(boolean canPathWalls) {
         if (canPathWalls) {
@@ -36,116 +62,111 @@ public class AdvancedWalkNodeEvaluator extends WalkNodeEvaluator {
         }
     }
 
-    // Override to ensure we create our CustomNode instead of the default Node
     @Override
-    protected Node getNode(int x, int y, int z) {
-        return this.nodes.computeIfAbsent(Node.createHash(x, y, z), (key) -> new CustomNode(x, y, z));
+    public void prepare(PathNavigationRegion level, Mob mob) {
+        super.prepare(level, mob);
+        this.nodes.clear();
     }
 
     @Override
-    public Node getStart() {
-        return findBestNode(this.mob.blockPosition(), 2);
+    public Node getNode(int x, int y, int z) {
+        return this.nodes.computeIfAbsent(Node.createHash(x, y, z), key -> new CustomNode(x, y, z));
     }
 
-    @Override
-    public Target getGoal(double x, double y, double z) {
-        Node node = findBestNode(new BlockPos(Mth.floor(x), Mth.floor(y), Mth.floor(z)), 3);
-        return getTargetFromNode(node);
-    }
+    /**
+     * REWRITTEN: Generates neighbors with symmetrical "step-up" and "step-down" logic.
+     */
+    public List<CustomNode> getRawNeighbors(CustomNode current) {
+        Set<CustomNode> neighbors = new HashSet<>();
+        BlockPos currentPos = current.asBlockPos();
 
-    @Override
-    public int getNeighbors(Node[] out, Node current) {
-        int i = 0;
-        CustomNode customCurrent = (CustomNode) current;
+        for (Direction dir : Direction.values()) {
+            BlockPos neighborPos = currentPos.relative(dir);
 
-        // As you correctly designed, we get movement directions based on the current attachment surface.
-        for (Direction moveDir : getMoveDirections(customCurrent.attachment)) {
-            BlockPos neighborPos = new BlockPos(current.x, current.y, current.z).relative(moveDir);
+            if (dir.getAxis().isVertical()) {
+                // For simple UP/DOWN movement, just check the single block.
+                tryAddNode(neighborPos, neighbors);
+            } else {
+                // For HORIZONTAL movement, check straight, up, and down.
+                // 1. Check at the same level.
+                tryAddNode(neighborPos, neighbors);
 
-            // Now find the best valid attachment for the neighbor position
-            Direction neighborAttachment = findValidAttachment(neighborPos);
-            if (neighborAttachment != null) {
-                CustomNode neighborNode = (CustomNode) this.getNode(neighborPos.getX(), neighborPos.getY(), neighborPos.getZ());
-                if (neighborNode != null && !neighborNode.closed) {
-                    neighborNode.attachment = neighborAttachment; // CRITICAL: Set the attachment for the next node
-                    out[i++] = neighborNode;
+                // 2. Check for a "step up".
+                if (this.mob != null && this.mob.maxUpStep > 0.0F) {
+                    tryAddNode(neighborPos.above(), neighbors);
                 }
+
+                // 3. Check for a "step down".
+                tryAddNode(neighborPos.below(), neighbors);
             }
         }
-        return i;
+        return new ArrayList<>(neighbors);
     }
 
-    @Override
-    public BlockPathTypes getBlockPathType(BlockGetter level, int x, int y, int z) {
-        if (!this.canOccupy(x, y, z)) {
-            return BlockPathTypes.BLOCKED;
+    private void tryAddNode(BlockPos pos, Set<CustomNode> set) {
+        Direction attachment = findValidAttachment(pos);
+        if (attachment != null && isPositionValidWithAttachment(pos, attachment)) {
+            CustomNode neighbor = (CustomNode) getNode(pos.getX(), pos.getY(), pos.getZ());
+            neighbor.attachment = attachment;
+            set.add(neighbor);
         }
-        if (findValidAttachment(new BlockPos(x, y, z)) != null) {
-            return BlockPathTypes.WALKABLE;
-        }
-        return BlockPathTypes.BLOCKED;
     }
 
-    // Helper to find the best attachment surface for a given position.
+    public boolean isPositionValidWithAttachment(BlockPos pos, Direction attachment) {
+        if (this.mob == null) return false;
+        double halfWidth = this.mob.getBbWidth() / 2.0;
+        double height = this.mob.getBbHeight();
+        double cx = pos.getX() + 0.5;
+        double cy = pos.getY() + 0.5;
+        double cz = pos.getZ() + 0.5;
+
+        AABB aabb;
+        if (attachment.getAxis().isHorizontal()) {
+            cx -= attachment.getStepX() * halfWidth;
+            cz -= attachment.getStepZ() * halfWidth;
+            aabb = new AABB(cx - halfWidth, cy - height / 2.0, cz - halfWidth,
+                    cx + halfWidth, cy + height / 2.0, cz + halfWidth);
+        } else {
+            aabb = new AABB(cx - halfWidth, pos.getY(), cz - halfWidth,
+                    cx + halfWidth, pos.getY() + height, cz + halfWidth);
+        }
+        return this.level.noCollision(this.mob, aabb);
+    }
+
     @Nullable
-    private Direction findValidAttachment(BlockPos pos) {
+    public Direction findValidAttachment(BlockPos pos) {
         for (Direction surface : allowedDirections) {
             BlockPos supportPos = pos.relative(surface);
-            if (!this.level.getBlockState(supportPos).getCollisionShape(this.level, supportPos).isEmpty()) {
+            if (this.level != null && !this.level.getBlockState(supportPos).getCollisionShape(this.level, supportPos).isEmpty()) {
                 return surface;
             }
         }
         return null;
     }
 
-    // Helper to find the best valid node in a small area, setting its attachment.
-    @Nullable
-    private Node findBestNode(BlockPos center, int radius) {
-        Node bestNode = null;
-        double bestDistSqr = Double.MAX_VALUE;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dy = -radius; dy <= radius; dy++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    BlockPos currentPos = center.offset(dx, dy, dz);
-                    if (this.canOccupy(currentPos.getX(), currentPos.getY(), currentPos.getZ())) {
-                        Direction attachment = findValidAttachment(currentPos);
-                        if (attachment != null) {
-                            CustomNode node = (CustomNode) this.getNode(currentPos.getX(), currentPos.getY(), currentPos.getZ());
-                            node.attachment = attachment;
-                            double distSqr = center.distToCenterSqr(currentPos.getX() + 0.5, currentPos.getY() + 0.5, currentPos.getZ() + 0.5);
-                            if (distSqr < bestDistSqr) {
-                                bestDistSqr = distSqr;
-                                bestNode = node;
-                            }
-                        }
-                    }
-                }
-            }
+    @Override
+    public BlockPathTypes getBlockPathType(BlockGetter level, int x, int y, int z) {
+        if (this.canOccupy(new BlockPos(x,y,z))) {
+            return BlockPathTypes.OPEN;
         }
-        return bestNode;
+        return BlockPathTypes.BLOCKED;
     }
 
-    // Helper to get movement directions based on the current attachment surface.
-    private Direction[] getMoveDirections(Direction attachment) {
-        if (attachment == null) return new Direction[0]; // Should not happen
-        switch (attachment) {
-            case DOWN, UP:
-                return HORIZONTAL_DIRECTIONS;
-            case NORTH, SOUTH:
-                return new Direction[]{Direction.UP, Direction.DOWN, Direction.EAST, Direction.WEST};
-            case EAST, WEST:
-                return new Direction[]{Direction.UP, Direction.DOWN, Direction.NORTH, Direction.SOUTH};
-            default:
-                return new Direction[0];
-        }
+    public boolean canOccupy(BlockPos pos) {
+        return canOccupy(pos.getX(), pos.getY(), pos.getZ());
     }
 
-    // Size-aware occupancy check
     private boolean canOccupy(int x, int y, int z) {
+        if (this.mob == null) return false;
         double w = this.mob.getBbWidth();
         double h = this.mob.getBbHeight();
-        double cx = x + 0.5, cy = y, cz = z + 0.5;
-        AABB aabb = new AABB(cx - w / 2, cy, cz - w / 2, cx + w / 2, cy + h, cz + w / 2);
+        double cx = x + 0.5;
+        double cy = y + 0.5;
+        double cz = z + 0.5;
+        AABB aabb = new AABB(
+                cx - w / 2.0, cy - h / 2.0, cz - w / 2.0,
+                cx + w / 2.0, cy + h / 2.0, cz + w / 2.0
+        );
         return this.level.noCollision(this.mob, aabb);
     }
 }
