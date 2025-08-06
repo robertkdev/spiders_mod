@@ -8,95 +8,108 @@ import com.horrormods.spiders.network.PacketHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.ai.targeting.TargetingConditions;
+import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.PathNavigationRegion;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.pathfinder.Node;
+import net.minecraft.world.level.pathfinder.Path;
+import net.minecraft.world.phys.*;
 import net.minecraftforge.network.PacketDistributor;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.PriorityQueue;
+import java.util.*;
 
 public class PathingToolItem extends Item {
 
-    private static BlockPos startPos;
-    private static BlockPos endPos;
-
     public PathingToolItem(Properties pProperties) {
-        super(pProperties);
+        super(pProperties.stacksTo(1));
     }
 
     @Override
-    public InteractionResult useOn(UseOnContext pContext) {
-        Level level = pContext.getLevel();
-        if (level.isClientSide()) {
-            return InteractionResult.SUCCESS;
+    public InteractionResultHolder<ItemStack> use(Level pLevel, Player pPlayer, InteractionHand pUsedHand) {
+        ItemStack tool = pPlayer.getItemInHand(pUsedHand);
+
+        if (pLevel.isClientSide()) {
+            return InteractionResultHolder.pass(tool);
         }
 
-        Player player = pContext.getPlayer();
-        BlockPos clickedBlock = pContext.getClickedPos();
-        Direction clickedFace = pContext.getClickedFace();
+        // --- NEW ROBUST RAY TRACE LOGIC ---
+        // 1. First, check for an entity hit.
+        double reachDistance = 5.0D; // Or pPlayer.getReachDistance();
+        Vec3 eyePos = pPlayer.getEyePosition();
+        Vec3 lookVec = pPlayer.getViewVector(1.0F);
+        Vec3 endPosVec = eyePos.add(lookVec.x * reachDistance, lookVec.y * reachDistance, lookVec.z * reachDistance);
+        AABB searchBox = pPlayer.getBoundingBox().expandTowards(lookVec.scale(reachDistance)).inflate(1.0D);
 
-        BlockPos targetAirBlock = clickedBlock.relative(clickedFace);
+        EntityHitResult entityHitResult = ProjectileUtil.getEntityHitResult(pPlayer, eyePos, endPosVec, searchBox,
+                (entity) -> !entity.isSpectator() && entity.isPickable(), reachDistance * reachDistance);
 
-        if (player.isShiftKeyDown()) {
-            endPos = targetAirBlock;
-            player.sendSystemMessage(Component.literal("End point set at: " + posToString(endPos)));
-            if (startPos != null) {
-                findPath((ServerLevel) level, player);
+        if (entityHitResult != null && entityHitResult.getEntity() instanceof GroundSpiderEntity spider) {
+            CompoundTag nbt = tool.getOrCreateTag();
+            nbt.putUUID("BoundSpiderUUID", spider.getUUID());
+            pPlayer.sendSystemMessage(Component.literal("Pathing tool bound to spider: " + spider.getUUID().toString().substring(0, 8)));
+            return InteractionResultHolder.success(tool);
+        }
+
+        // 2. If no entity was hit, check for a block hit.
+        BlockHitResult blockHitResult = getPlayerPOVHitResult(pLevel, pPlayer, ClipContext.Fluid.NONE);
+        if (blockHitResult.getType() == HitResult.Type.BLOCK) {
+            BlockPos clickedBlock = blockHitResult.getBlockPos();
+            Direction clickedFace = blockHitResult.getDirection();
+            BlockPos targetAirBlock = clickedBlock.relative(clickedFace);
+            CompoundTag nbt = tool.getOrCreateTag();
+
+            if (nbt.contains("StartPoint")) {
+                BlockPos startPos = NbtUtils.readBlockPos(nbt.getCompound("StartPoint"));
+                pPlayer.sendSystemMessage(Component.literal("End point set at: " + posToString(targetAirBlock)));
+                findPath((ServerLevel) pLevel, pPlayer, tool, startPos, targetAirBlock);
+                nbt.remove("StartPoint");
             } else {
-                player.sendSystemMessage(Component.literal("Set a start point first!"));
+                nbt.put("StartPoint", NbtUtils.writeBlockPos(targetAirBlock));
+                pPlayer.sendSystemMessage(Component.literal("Start point set at: " + posToString(targetAirBlock)));
+                ((ServerLevel) pLevel).sendParticles(ParticleTypes.HAPPY_VILLAGER, targetAirBlock.getX() + 0.5, targetAirBlock.getY() + 0.5, targetAirBlock.getZ() + 0.5, 20, 0, 0, 0, 0);
             }
-        } else {
-            startPos = targetAirBlock;
-            player.sendSystemMessage(Component.literal("Start point set at: " + posToString(startPos)));
-            ((ServerLevel) level).sendParticles(ParticleTypes.HAPPY_VILLAGER, startPos.getX() + 0.5, startPos.getY() + 0.5, startPos.getZ() + 0.5, 20, 0, 0, 0, 0);
+            return InteractionResultHolder.success(tool);
         }
-        return InteractionResult.SUCCESS;
+
+        return InteractionResultHolder.pass(tool);
     }
 
-    private @Nullable CustomNode makeNode(BlockPos pos, AdvancedWalkNodeEvaluator eval) {
-        System.out.println("--- Making node for: " + posToString(pos) + " ---");
-        // 1. Find an attachment surface first.
-        Direction attach = eval.findValidAttachment(pos);
-        if (attach == null) {
-            System.out.println("makeNode failed for " + pos + ": No valid attachment found.");
-            return null;
-        }
-
-        // 2. Now check for collision using the evaluator's public validation method.
-        if (!eval.isPositionValidWithAttachment(pos, attach)) {
-            System.out.println("makeNode failed for " + pos + ": Position is not valid (collision).");
-            return null;
-        }
-
-        CustomNode node = (CustomNode) eval.getNode(pos.getX(), pos.getY(), pos.getZ());
-        node.attachment = attach;
-        return node;
+    @Override
+    public boolean isFoil(ItemStack pStack) {
+        return pStack.hasTag() && pStack.getTag().contains("BoundSpiderUUID");
     }
 
-    private void findPath(ServerLevel level, Player player) {
-        TargetingConditions targetConditions = TargetingConditions.forNonCombat().ignoreLineOfSight();
-        GroundSpiderEntity spider = level.getNearestEntity(
-                GroundSpiderEntity.class, targetConditions, null,
-                player.getX(), player.getY(), player.getZ(),
-                player.getBoundingBox().inflate(64.0D)
-        );
+    // The old useOn and interactLivingEntity methods are no longer needed.
 
-        if (spider == null) {
-            player.sendSystemMessage(Component.literal("No ground spider found nearby to provide context."));
+    private void findPath(ServerLevel level, Player player, ItemStack tool, BlockPos startPos, BlockPos endPos) {
+        CompoundTag nbt = tool.getTag();
+        if (nbt == null || !nbt.hasUUID("BoundSpiderUUID")) {
+            player.sendSystemMessage(Component.literal("No spider bound. Right-click a spider to bind it."));
+            return;
+        }
+
+        UUID spiderId = nbt.getUUID("BoundSpiderUUID");
+        GroundSpiderEntity spider = (GroundSpiderEntity) level.getEntity(spiderId);
+
+        if (spider == null || !spider.isAlive()) {
+            player.sendSystemMessage(Component.literal("Bound spider has disappeared. Unbinding tool."));
+            nbt.remove("BoundSpiderUUID");
             return;
         }
 
@@ -110,28 +123,33 @@ public class PathingToolItem extends Item {
         eval.setCanPathCeiling(true);
         eval.prepare(region, spider);
 
-        System.out.println("Attempting to create nodes with evaluator configured.");
         CustomNode startNode = makeNode(startPos, eval);
         CustomNode goalNode = makeNode(endPos, eval);
 
-        if (startNode == null) {
-            player.sendSystemMessage(Component.literal("Could not create a valid start node at " + posToString(startPos) + ". Is it a valid air block with an adjacent surface?"));
-            return;
-        }
-        if (goalNode == null) {
-            player.sendSystemMessage(Component.literal("Could not create a valid end node at " + posToString(endPos) + ". Is it a valid air block with an adjacent surface?"));
+        if (startNode == null || goalNode == null) {
+            player.sendSystemMessage(Component.literal("Could not create a valid start or end node."));
             return;
         }
 
-        PriorityQueue<CustomNode> open = new PriorityQueue<>(Comparator.comparingDouble(n -> n.g + n.h));
+        PriorityQueue<CustomNode> open = new PriorityQueue<>(new Comparator<CustomNode>() {
+            @Override
+            public int compare(CustomNode o1, CustomNode o2) {
+                double f1 = o1.g + o1.h;
+                double f2 = o2.g + o2.h;
+                int fCompare = Double.compare(f1, f2);
+                if (fCompare != 0) return fCompare;
+                return Double.compare(o1.h, o2.h);
+            }
+        });
+
         HashSet<CustomNode> closed = new HashSet<>();
         CustomNode finalNode = null;
 
         startNode.g = 0;
-        startNode.h = startNode.distanceTo(goalNode);
+        startNode.h = startNode.distanceManhattan(goalNode);
         open.add(startNode);
 
-        int maxIterations = 5000;
+        int maxIterations = 10000;
         int currentIterations = 0;
 
         while (!open.isEmpty() && currentIterations < maxIterations) {
@@ -145,11 +163,11 @@ public class PathingToolItem extends Item {
 
             for (CustomNode neighbor : eval.getRawNeighbors(current)) {
                 if (closed.contains(neighbor)) continue;
-                double tentativeG = current.g + current.distanceTo(neighbor);
+                double tentativeG = current.g + 1.0;
                 if (tentativeG < neighbor.g) {
                     neighbor.parent = current;
                     neighbor.g = tentativeG;
-                    neighbor.h = neighbor.distanceTo(goalNode);
+                    neighbor.h = neighbor.distanceManhattan(goalNode);
                     if (!open.contains(neighbor)) {
                         open.add(neighbor);
                     } else {
@@ -160,23 +178,44 @@ public class PathingToolItem extends Item {
             }
         }
 
-        if(currentIterations >= maxIterations) {
-            System.out.println("Pathfinding stopped: reached max iterations.");
-        }
-
         if (finalNode != null) {
-            LinkedList<BlockPos> pathNodes = new LinkedList<>();
+            LinkedList<CustomNode> pathCustomNodes = new LinkedList<>();
             CustomNode current = finalNode;
             while (current != null) {
-                pathNodes.addFirst(current.asBlockPos());
+                pathCustomNodes.addFirst(current);
                 current = current.parent;
             }
-            player.sendSystemMessage(Component.literal("Path found! Length: " + pathNodes.size()));
-            PacketHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> (ServerPlayer) player), new DisplayPathPacket(new ArrayList<>(pathNodes)));
+
+            if (pathCustomNodes.isEmpty()) return;
+
+            List<Node> vanillaNodes = new ArrayList<>(pathCustomNodes);
+            List<BlockPos> pathPositions = vanillaNodes.stream().map(Node::asBlockPos).toList();
+
+            Path path = new Path(vanillaNodes, goalNode.asBlockPos(), false);
+
+            BlockPos firstPos = pathPositions.get(0);
+            spider.teleportTo(firstPos.getX() + 0.5, firstPos.getY(), firstPos.getZ() + 0.5);
+
+            PathNavigation navigation = spider.getNavigation();
+            navigation.stop();
+            navigation.moveTo(path, 1.0D);
+
+            player.sendSystemMessage(Component.literal("Path sent to spider! Length: " + path.getNodeCount()));
+            PacketHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> (ServerPlayer) player), new DisplayPathPacket(pathPositions));
         } else {
             player.sendSystemMessage(Component.literal("Could not find a path to the end point."));
             level.sendParticles(ParticleTypes.SMOKE, endPos.getX() + 0.5, endPos.getY() + 0.5, endPos.getZ() + 0.5, 20, 0, 0, 0, 0);
         }
+    }
+
+    @Nullable
+    private CustomNode makeNode(BlockPos pos, AdvancedWalkNodeEvaluator eval) {
+        Direction attach = eval.findValidAttachment(pos);
+        if (attach == null) return null;
+        if (!eval.isPositionValidWithAttachment(pos, attach)) return null;
+        CustomNode node = (CustomNode) eval.getNode(pos.getX(), pos.getY(), pos.getZ());
+        node.attachment = attach;
+        return node;
     }
 
     private String posToString(BlockPos pos) {

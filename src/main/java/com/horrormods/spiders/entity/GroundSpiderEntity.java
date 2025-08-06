@@ -1,17 +1,29 @@
 package com.horrormods.spiders.entity;
 
 import com.horrormods.spiders.entity.ai.AdvancedClimberPathNavigator;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.AgeableMob;
+import com.horrormods.spiders.entity.ai.AdvancedWalkNodeEvaluator;
+import com.horrormods.spiders.entity.ai.ClimberMoveControl;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.ai.goal.FloatGoal;
-import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
-import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
-import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
-import net.minecraft.world.entity.ai.navigation.PathNavigation;
-import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.MobType;
+import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.ai.goal.*;
+import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
+import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
+import net.minecraft.world.entity.animal.IronGolem;
+import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.PathNavigationRegion;
+import net.minecraft.world.level.block.state.BlockState;
 import software.bernie.geckolib3.core.IAnimatable;
 import software.bernie.geckolib3.core.PlayState;
 import software.bernie.geckolib3.core.builder.AnimationBuilder;
@@ -22,40 +34,104 @@ import software.bernie.geckolib3.core.manager.AnimationData;
 import software.bernie.geckolib3.core.manager.AnimationFactory;
 import software.bernie.geckolib3.util.GeckoLibUtil;
 
-import javax.annotation.Nullable;
-
-public class GroundSpiderEntity extends Animal implements IAnimatable {
+public class GroundSpiderEntity extends Monster implements IAnimatable {
     private final AnimationFactory factory = GeckoLibUtil.createFactory(this);
 
-    public GroundSpiderEntity(EntityType<? extends Animal> entityType, Level level) {
-        super(entityType, level);
+    private static final EntityDataAccessor<Direction> ATTACHMENT_DIRECTION = SynchedEntityData.defineId(GroundSpiderEntity.class, EntityDataSerializers.DIRECTION);
+    private transient AdvancedWalkNodeEvaluator nodeEvaluator;
+
+    public GroundSpiderEntity(EntityType<? extends Monster> pEntityType, Level pLevel) {
+        super(pEntityType, pLevel);
+        // THIS IS THE CORRECTED LOGIC: Initialize our custom controls and navigation here.
+        this.moveControl = new ClimberMoveControl(this);
+        this.navigation = new AdvancedClimberPathNavigator(this, this.level, true, true);
     }
 
-    // Basic AI Goals
+    public static AttributeSupplier.Builder createAttributes() {
+        return Monster.createMonsterAttributes()
+                .add(Attributes.MAX_HEALTH, 16.0D)
+                .add(Attributes.MOVEMENT_SPEED, 0.3F)
+                .add(Attributes.ATTACK_DAMAGE, 3.0D);
+    }
+
+    @Override
+    protected void defineSynchedData() {
+        super.defineSynchedData();
+        this.entityData.define(ATTACHMENT_DIRECTION, Direction.DOWN);
+    }
+
+    public Direction getAttachmentDirection() {
+        return this.entityData.get(ATTACHMENT_DIRECTION);
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        if (!this.level.isClientSide()) {
+            if (this.nodeEvaluator == null) {
+                this.nodeEvaluator = new AdvancedWalkNodeEvaluator();
+            }
+
+            BlockPos corner1 = this.blockPosition().offset(-2, -2, -2);
+            BlockPos corner2 = this.blockPosition().offset(2, 2, 2);
+            PathNavigationRegion region = new PathNavigationRegion(this.level, corner1, corner2);
+
+            this.nodeEvaluator.prepare(region, this);
+            this.nodeEvaluator.setCanPathWalls(true);
+            this.nodeEvaluator.setCanPathCeiling(true);
+
+            Direction currentAttachment = this.nodeEvaluator.findValidAttachment(this.blockPosition());
+
+            if (currentAttachment != null && currentAttachment != getAttachmentDirection()) {
+                this.entityData.set(ATTACHMENT_DIRECTION, currentAttachment);
+            }
+        }
+    }
+
     @Override
     protected void registerGoals() {
-        this.goalSelector.addGoal(0, new FloatGoal(this));
-        this.goalSelector.addGoal(1, new WaterAvoidingRandomStrollGoal(this, 1.0D));
-        this.goalSelector.addGoal(2, new LookAtPlayerGoal(this, Player.class, 6.0F));
-        this.goalSelector.addGoal(3, new RandomLookAroundGoal(this));
+        this.goalSelector.addGoal(1, new FloatGoal(this));
+        this.goalSelector.addGoal(3, new LeapAtTargetGoal(this, 0.4F));
+        this.goalSelector.addGoal(4, new MeleeAttackGoal(this, 1.0D, true));
+        this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 0.8D));
+        this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(6, new RandomLookAroundGoal(this));
+
+        this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
+        this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Player.class, true));
+        this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, IronGolem.class, true));
     }
 
-    // Animation Handling
+    // The createNavigation override is no longer needed, as we assign it directly in the constructor.
+
+    @Override
+    public MobType getMobType() {
+        return MobType.ARTHROPOD;
+    }
+
+    // --- Sounds ---
+    @Override
+    protected SoundEvent getAmbientSound() { return SoundEvents.SPIDER_AMBIENT; }
+
+    @Override
+    protected SoundEvent getHurtSound(DamageSource pDamageSource) { return SoundEvents.SPIDER_HURT; }
+
+    @Override
+    protected SoundEvent getDeathSound() { return SoundEvents.SPIDER_DEATH; }
+
+    @Override
+    protected void playStepSound(BlockPos pPos, BlockState pBlock) {
+        this.playSound(SoundEvents.SPIDER_STEP, 0.15F, 1.0F);
+    }
+
+    // --- Animation Handling ---
     private <E extends IAnimatable> PlayState predicate(AnimationEvent<E> event) {
-        // Check if the entity is moving
         if (event.isMoving()) {
-            // Use the correct name "walk_forward" from your JSON file
             event.getController().setAnimation(new AnimationBuilder().addAnimation("walk_forward", ILoopType.EDefaultLoopTypes.LOOP));
         } else {
-            // Use the correct name "idle" from your JSON file
             event.getController().setAnimation(new AnimationBuilder().addAnimation("idle", ILoopType.EDefaultLoopTypes.LOOP));
         }
         return PlayState.CONTINUE;
-    }
-
-    @Override
-    protected PathNavigation createNavigation(Level pLevel) {
-        return new AdvancedClimberPathNavigator(this, pLevel, true, true);
     }
 
     @Override
@@ -66,12 +142,5 @@ public class GroundSpiderEntity extends Animal implements IAnimatable {
     @Override
     public AnimationFactory getFactory() {
         return this.factory;
-    }
-
-    // Required for Animal class
-    @Nullable
-    @Override
-    public AgeableMob getBreedOffspring(ServerLevel p_146743_, AgeableMob p_146744_) {
-        return null; // No breeding for now
     }
 }

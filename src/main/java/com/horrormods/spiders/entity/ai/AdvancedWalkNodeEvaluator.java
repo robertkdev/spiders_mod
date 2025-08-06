@@ -21,11 +21,19 @@ public class AdvancedWalkNodeEvaluator extends WalkNodeEvaluator {
 
     private final EnumSet<Direction> allowedDirections = EnumSet.of(Direction.DOWN);
 
+    private boolean startPathOnGround = true; // NEW FLAG
+
+    public void setStartPathOnGround(boolean pStartPathOnGround) {
+        this.startPathOnGround = pStartPathOnGround;
+    }
+
     public static class CustomNode extends Node {
         public Direction attachment;
+        // EXPLICITLY DEFINE G AND H AS DOUBLES to remove any ambiguity
         public double g = Double.MAX_VALUE;
         public double h;
         public CustomNode parent;
+
 
         public CustomNode(int x, int y, int z) {
             super(x, y, z);
@@ -62,6 +70,25 @@ public class AdvancedWalkNodeEvaluator extends WalkNodeEvaluator {
         }
     }
 
+    /**
+     * NEW OVERRIDE: Allows paths to start off the ground (e.g., on a wall).
+     */
+    @Override
+    public Node getStart() {
+        if (this.mob == null) return null;
+        BlockPos currentPos = this.mob.blockPosition();
+
+        if (!startPathOnGround) {
+            // If we don't need to start on the ground, just check if the current position is valid
+            Direction attachment = findValidAttachment(currentPos);
+            if (attachment != null && isPositionValidWithAttachment(currentPos, attachment)) {
+                return this.getNode(currentPos);
+            }
+        }
+
+        // Fallback to vanilla ground-based start node finding
+        return super.getStart();
+    }
     @Override
     public void prepare(PathNavigationRegion level, Mob mob) {
         super.prepare(level, mob);
@@ -73,42 +100,50 @@ public class AdvancedWalkNodeEvaluator extends WalkNodeEvaluator {
         return this.nodes.computeIfAbsent(Node.createHash(x, y, z), key -> new CustomNode(x, y, z));
     }
 
-    /**
-     * REWRITTEN: Generates neighbors with symmetrical "step-up" and "step-down" logic.
-     */
+
     public List<CustomNode> getRawNeighbors(CustomNode current) {
         Set<CustomNode> neighbors = new HashSet<>();
         BlockPos currentPos = current.asBlockPos();
 
         for (Direction dir : Direction.values()) {
             BlockPos neighborPos = currentPos.relative(dir);
-
             if (dir.getAxis().isVertical()) {
-                // For simple UP/DOWN movement, just check the single block.
-                tryAddNode(neighborPos, neighbors);
+                tryAddNode(neighborPos, false, neighbors);
             } else {
-                // For HORIZONTAL movement, check straight, up, and down.
-                // 1. Check at the same level.
-                tryAddNode(neighborPos, neighbors);
-
-                // 2. Check for a "step up".
+                tryAddNode(neighborPos, true, neighbors);
                 if (this.mob != null && this.mob.maxUpStep > 0.0F) {
-                    tryAddNode(neighborPos.above(), neighbors);
+                    tryAddNode(neighborPos.above(), true, neighbors);
                 }
-
-                // 3. Check for a "step down".
-                tryAddNode(neighborPos.below(), neighbors);
+                tryAddNode(neighborPos.below(), true, neighbors);
             }
         }
         return new ArrayList<>(neighbors);
     }
 
-    private void tryAddNode(BlockPos pos, Set<CustomNode> set) {
+    private void tryAddNode(BlockPos pos, boolean allowDownwardScan, Set<CustomNode> set) {
         Direction attachment = findValidAttachment(pos);
         if (attachment != null && isPositionValidWithAttachment(pos, attachment)) {
-            CustomNode neighbor = (CustomNode) getNode(pos.getX(), pos.getY(), pos.getZ());
+            CustomNode neighbor = (CustomNode) getNode(pos);
             neighbor.attachment = attachment;
             set.add(neighbor);
+            return;
+        }
+
+        if (allowDownwardScan && this.level.getBlockState(pos).isAir()) {
+            BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos(pos.getX(), pos.getY(), pos.getZ());
+            // UPDATED: Use the mob's max fall distance instead of a hardcoded value
+            for (int i = 0; i < this.mob.getMaxFallDistance(); i++) {
+                mutablePos.move(Direction.DOWN);
+                if (!this.level.getBlockState(mutablePos).isAir()) {
+                    Direction landingAttachment = findValidAttachment(mutablePos);
+                    if (landingAttachment != null && isPositionValidWithAttachment(mutablePos, landingAttachment)) {
+                        CustomNode neighbor = (CustomNode) getNode(mutablePos);
+                        neighbor.attachment = landingAttachment;
+                        set.add(neighbor);
+                    }
+                    return; // Stop scanning down once we hit any non-air block
+                }
+            }
         }
     }
 
@@ -145,11 +180,15 @@ public class AdvancedWalkNodeEvaluator extends WalkNodeEvaluator {
     }
 
     @Override
-    public BlockPathTypes getBlockPathType(BlockGetter level, int x, int y, int z) {
-        if (this.canOccupy(new BlockPos(x,y,z))) {
-            return BlockPathTypes.OPEN;
+    public BlockPathTypes getBlockPathType(BlockGetter pLevel, int pX, int pY, int pZ) {
+        BlockPos pos = new BlockPos(pX, pY, pZ);
+        BlockPathTypes pathType = super.getBlockPathType(pLevel, pX, pY, pZ);
+
+        if (pathType == BlockPathTypes.OPEN && findValidAttachment(pos) != null) {
+            return BlockPathTypes.WALKABLE;
         }
-        return BlockPathTypes.BLOCKED;
+
+        return pathType;
     }
 
     public boolean canOccupy(BlockPos pos) {
