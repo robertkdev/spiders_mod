@@ -1,6 +1,7 @@
 package com.horrormods.spiders.entity.ai;
 
 import com.horrormods.spiders.entity.GroundSpiderEntity;
+import com.horrormods.spiders.entity.util.AttachmentHelper;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -9,58 +10,63 @@ import net.minecraft.world.phys.Vec3;
 
 public class ClimberMoveControl extends MoveControl {
 
-    public ClimberMoveControl(GroundSpiderEntity pMob) {
-        super(pMob);
+    public static boolean DEBUG = false;
+
+    public ClimberMoveControl(GroundSpiderEntity mob) {
+        super(mob);
     }
 
     @Override
     public void tick() {
         if (this.operation != Operation.MOVE_TO) {
-            // Stop movement if the goal is reached or there's no goal
             this.mob.setZza(0.0F);
             return;
         }
 
-        this.operation = Operation.WAIT; // Reset operation, will be set again by navigator if needed
+        final double tx = this.wantedX, ty = this.wantedY, tz = this.wantedZ;
 
-        if (this.mob instanceof GroundSpiderEntity spider) {
-            Direction attachment = spider.getAttachmentDirection();
-            spider.setNoGravity(attachment != Direction.DOWN);
-
-            // --- MOVEMENT ---
-            Vec3 targetVec = new Vec3(this.wantedX - mob.getX(), this.wantedY - mob.getY(), this.wantedZ - mob.getZ());
-            double distanceToTarget = targetVec.length();
-
-            // Stop if we are very close to the target
-            if (distanceToTarget < 0.5D) {
-                this.mob.setDeltaMovement(Vec3.ZERO);
-                return;
-            }
-
-            targetVec = targetVec.normalize();
-
-            if (attachment != Direction.DOWN) {
-                // --- THIS IS THE CORRECTED LOGIC FOR WALL/CEILING MOVEMENT ---
-                // We directly SET the velocity to a reasonable speed, preventing runaway acceleration.
-                double speed = this.speedModifier * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
-                this.mob.setDeltaMovement(targetVec.scale(speed));
-                // ----------------------------------------------------------------
-
-            } else {
-                // For ground movement, let the vanilla method handle it, which includes friction.
-                this.mob.moveRelative((float)(this.speedModifier * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)), new Vec3(this.wantedX - mob.getX(), 0, this.wantedZ - mob.getZ()));
-            }
-
-            // --- ROTATION ---
-            float targetYaw = (float) (Mth.atan2(targetVec.z, targetVec.x) * (double) (180F / (float) Math.PI)) - 90.0F;
-            float currentYaw = mob.getYRot();
-            float yawDelta = Mth.wrapDegrees(targetYaw - currentYaw);
-
-            // Use the mob's turn speed attribute for smooth, configurable turning
-            float maxTurnSpeed = (float) this.mob.getAttributeValue(Attributes.FLYING_SPEED) * 10; // Or a fixed value
-
-            mob.setYRot(currentYaw + Mth.clamp(yawDelta, -maxTurnSpeed, maxTurnSpeed));
-            mob.yBodyRot = mob.getYRot();
+        this.mob.setZza((float) this.speedModifier);
+        if (((GroundSpiderEntity)this.mob).getAttachmentDirection() == Direction.DOWN) {
+            float groundSpeed = (float)(this.speedModifier * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED));
+            this.mob.setSpeed(groundSpeed);
         }
+
+        Direction attach = ((GroundSpiderEntity)this.mob).getAttachmentDirection();
+
+        double dx = tx - this.mob.getX();
+        double dy = ty - this.mob.getY();
+        double dz = tz - this.mob.getZ();
+        Vec3 toTarget = new Vec3(dx, dy, dz);
+
+        Vec3 n = AttachmentHelper.normal(attach);
+        Vec3 tangentDir = (attach == Direction.DOWN) ?
+                new Vec3(dx, 0, dz) :
+                AttachmentHelper.projectOntoPlane(toTarget, n);
+
+        float targetYaw;
+        if (tangentDir.lengthSqr() > 1.0E-6) {
+            targetYaw = (float)(Math.atan2(tangentDir.z, tangentDir.x) * (180.0 / Math.PI)) - 90.0F;
+        } else {
+            targetYaw = this.mob.getYRot();
+        }
+        float newYaw = this.rotlerp(this.mob.getYRot(), targetYaw, 30.0F);
+        this.mob.setYRot(newYaw);
+        this.mob.yBodyRot = newYaw;
+
+        if (attach != Direction.DOWN) {
+            double horiz = Math.max(1.0E-4, Math.sqrt(tangentDir.x * tangentDir.x + tangentDir.z * tangentDir.z));
+            float targetPitch = (float)(-(Math.atan2(tangentDir.y, horiz) * (180.0 / Math.PI)));
+            float newPitch = Mth.rotLerp(0.35f, this.mob.getXRot(), targetPitch);
+            newPitch = Mth.clamp(newPitch, -85.0F, 85.0F);
+            this.mob.setXRot(newPitch);
+        }
+
+        if (DEBUG) {
+            System.out.printf("[TURN] t=%d yaw=%.1f pitch=%.1f attach=%s to=(%.2f,%.2f,%.2f) tangent=(%.3f,%.3f,%.3f)%n",
+                    this.mob.tickCount, this.mob.getYRot(), this.mob.getXRot(), attach,
+                    tx, ty, tz, tangentDir.x, tangentDir.y, tangentDir.z);
+        }
+
+        this.operation = Operation.WAIT;
     }
 }

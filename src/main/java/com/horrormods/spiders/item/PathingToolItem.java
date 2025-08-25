@@ -1,8 +1,7 @@
 package com.horrormods.spiders.item;
 
 import com.horrormods.spiders.entity.GroundSpiderEntity;
-import com.horrormods.spiders.entity.ai.AdvancedWalkNodeEvaluator;
-import com.horrormods.spiders.entity.ai.AdvancedWalkNodeEvaluator.CustomNode;
+import com.horrormods.spiders.entity.ai.ClimberNodeEvaluator;
 import com.horrormods.spiders.network.DisplayPathPacket;
 import com.horrormods.spiders.network.PacketHandler;
 import net.minecraft.core.BlockPos;
@@ -14,15 +13,12 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.PathNavigationRegion;
@@ -30,6 +26,7 @@ import net.minecraft.world.level.pathfinder.Node;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.*;
 import net.minecraftforge.network.PacketDistributor;
+import com.horrormods.spiders.entity.ai.ClimberNodeEvaluator.CustomNode;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -106,7 +103,6 @@ public class PathingToolItem extends Item {
 
         UUID spiderId = nbt.getUUID("BoundSpiderUUID");
         GroundSpiderEntity spider = (GroundSpiderEntity) level.getEntity(spiderId);
-
         if (spider == null || !spider.isAlive()) {
             player.sendSystemMessage(Component.literal("Bound spider has disappeared. Unbinding tool."));
             nbt.remove("BoundSpiderUUID");
@@ -114,17 +110,17 @@ public class PathingToolItem extends Item {
         }
 
         AABB bounds = new AABB(startPos, endPos).inflate(32);
-        BlockPos regionCorner1 = new BlockPos(bounds.minX, bounds.minY, bounds.minZ);
-        BlockPos regionCorner2 = new BlockPos(bounds.maxX, bounds.maxY, bounds.maxZ);
-        PathNavigationRegion region = new PathNavigationRegion(level, regionCorner1, regionCorner2);
+        BlockPos c1 = new BlockPos(bounds.minX, bounds.minY, bounds.minZ);
+        BlockPos c2 = new BlockPos(bounds.maxX, bounds.maxY, bounds.maxZ);
+        PathNavigationRegion region = new PathNavigationRegion(level, c1, c2);
 
-        AdvancedWalkNodeEvaluator eval = new AdvancedWalkNodeEvaluator();
+        ClimberNodeEvaluator eval = new ClimberNodeEvaluator();
         eval.setCanPathWalls(true);
         eval.setCanPathCeiling(true);
         eval.prepare(region, spider);
 
-        CustomNode startNode = makeNode(startPos, eval);
-        CustomNode goalNode = makeNode(endPos, eval);
+        CustomNode startNode = (CustomNode) makeNode(startPos, eval);
+        CustomNode goalNode  = (CustomNode) makeNode(endPos,  eval);
 
         if (startNode == null || goalNode == null) {
             player.sendSystemMessage(Component.literal("Could not create a valid start or end node."));
@@ -209,13 +205,13 @@ public class PathingToolItem extends Item {
     }
 
     @Nullable
-    private CustomNode makeNode(BlockPos pos, AdvancedWalkNodeEvaluator eval) {
-        Direction attach = eval.findValidAttachment(pos);
-        if (attach == null) return null;
-        if (!eval.isPositionValidWithAttachment(pos, attach)) return null;
-        CustomNode node = (CustomNode) eval.getNode(pos.getX(), pos.getY(), pos.getZ());
-        node.attachment = attach;
-        return node;
+    private Node makeNode(BlockPos pos, ClimberNodeEvaluator eval) {
+        Direction a = eval.findValidAttachment(pos);
+        if (a == null) return null;
+        if (!eval.isPositionValidWithAttachment(pos, a)) return null;
+        CustomNode n = (CustomNode) eval.getNode(pos.getX(), pos.getY(), pos.getZ());
+        n.attachment = a;
+        return n;
     }
 
     private String posToString(BlockPos pos) {
