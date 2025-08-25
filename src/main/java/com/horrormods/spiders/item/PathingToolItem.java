@@ -14,7 +14,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
-import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.Item;
@@ -23,7 +22,6 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.PathNavigationRegion;
 import net.minecraft.world.level.pathfinder.Node;
-import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.*;
 import net.minecraftforge.network.PacketDistributor;
 import com.horrormods.spiders.entity.ai.ClimberNodeEvaluator.CustomNode;
@@ -187,16 +185,13 @@ public class PathingToolItem extends Item {
             List<Node> vanillaNodes = new ArrayList<>(pathCustomNodes);
             List<BlockPos> pathPositions = vanillaNodes.stream().map(Node::asBlockPos).toList();
 
-            Path path = new Path(vanillaNodes, goalNode.asBlockPos(), false);
-
             BlockPos firstPos = pathPositions.get(0);
             spider.teleportTo(firstPos.getX() + 0.5, firstPos.getY(), firstPos.getZ() + 0.5);
 
-            PathNavigation navigation = spider.getNavigation();
-            navigation.stop();
-            navigation.moveTo(path, 1.0D);
+            // Force the spider to follow the path at a constant speed
+            spider.startForcedPath(pathPositions, 0.25D);
 
-            player.sendSystemMessage(Component.literal("Path sent to spider! Length: " + path.getNodeCount()));
+            player.sendSystemMessage(Component.literal("Path sent to spider! Length: " + pathPositions.size()));
             PacketHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> (ServerPlayer) player), new DisplayPathPacket(pathPositions));
         } else {
             player.sendSystemMessage(Component.literal("Could not find a path to the end point."));

@@ -27,6 +27,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.PathNavigationRegion;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.List;
 import software.bernie.geckolib3.core.IAnimatable;
 import software.bernie.geckolib3.core.PlayState;
 import software.bernie.geckolib3.core.builder.AnimationBuilder;
@@ -49,10 +51,34 @@ public class GroundSpiderEntity extends Monster implements IAnimatable, IClimber
     private int pendingAttachTicks = 0;
     private static final int ATTACH_CONFIRM_TICKS = 4;
 
+    // Forced path following fields
+    private List<BlockPos> forcedPath = null;
+    private int forcedPathIndex = 0;
+    private double forcedSpeed = 0.0D;
+
     public GroundSpiderEntity(EntityType<? extends Monster> type, Level level) {
         super(type, level);
         this.moveControl = new ClimberMoveControl(this);
         this.navigation = new ClimberPathNavigator(this, this.level, true, true);
+    }
+
+    // Begin moving along a forced path at a constant speed
+    public void startForcedPath(List<BlockPos> path, double speed) {
+        if (path == null || path.isEmpty()) return;
+        this.forcedPath = path;
+        this.forcedSpeed = speed;
+        // Assume caller has already placed us at the first node
+        this.forcedPathIndex = 1;
+        this.noPhysics = true;
+        this.setNoGravity(true);
+    }
+
+    private void clearForcedPath() {
+        this.forcedPath = null;
+        this.forcedPathIndex = 0;
+        this.forcedSpeed = 0.0D;
+        this.noPhysics = false;
+        this.setNoGravity(false);
     }
 
     public static AttributeSupplier.Builder createAttributes() {
@@ -121,11 +147,40 @@ public class GroundSpiderEntity extends Monster implements IAnimatable, IClimber
             if (getAttachmentDirection() != Direction.DOWN && !this.isNoGravity()) {
                 this.setNoGravity(true);
             }
+
+            // Handle forced path movement
+            if (this.forcedPath != null && this.forcedPathIndex < this.forcedPath.size()) {
+                BlockPos targetBlock = this.forcedPath.get(this.forcedPathIndex);
+                Vec3 target = new Vec3(targetBlock.getX() + 0.5, targetBlock.getY(), targetBlock.getZ() + 0.5);
+                Vec3 pos = this.position();
+                Vec3 diff = target.subtract(pos);
+                double dist = diff.length();
+
+                if (dist <= this.forcedSpeed) {
+                    this.setPos(target.x, target.y, target.z);
+                    this.forcedPathIndex++;
+                } else {
+                    Vec3 step = diff.normalize().scale(this.forcedSpeed);
+                    this.setPos(pos.add(step));
+                }
+
+                if (this.forcedPathIndex >= this.forcedPath.size()) {
+                    clearForcedPath();
+                }
+            } else if (this.forcedPath != null) {
+                clearForcedPath();
+            }
         }
     }
 
     @Override
     public void travel(Vec3 input) {
+        if (this.forcedPath != null) {
+            // Movement handled manually in tick while on a forced path
+            this.setNoGravity(true);
+            return;
+        }
+
         Direction attach = getAttachmentDirection();
         boolean attached = (attach != Direction.DOWN);
 
