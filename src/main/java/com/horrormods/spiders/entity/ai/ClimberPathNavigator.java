@@ -12,14 +12,24 @@ import net.minecraft.world.level.pathfinder.BlockPathTypes;
 import net.minecraft.world.level.pathfinder.Node;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.level.pathfinder.PathFinder;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import com.horrormods.spiders.entity.ai.nav.NavMeshPathFinder;
+import com.horrormods.spiders.entity.ai.ThetaStar;
+
+import java.util.concurrent.CompletableFuture;
 
 public class ClimberPathNavigator extends GroundPathNavigation {
 
     public static boolean DEBUG = false;
+    private Vec3 lastTargetPos = Vec3.ZERO;
+    private final NavMeshPathFinder meshFinder;
+    private CompletableFuture<Path> pendingPath;
 
     public ClimberPathNavigator(Mob mob, Level level, boolean canClimbWalls, boolean canClimbCeilings) {
         super(mob, level);
+        this.meshFinder = new NavMeshPathFinder(level);
     }
 
     @Override
@@ -40,6 +50,17 @@ public class ClimberPathNavigator extends GroundPathNavigation {
         return this.createPath(ImmutableSet.of(entity.blockPosition()), 16, true, accuracy);
     }
 
+    @Override
+    protected Path createPath(ImmutableSet<BlockPos> positions, int maxVisited, boolean offsetUpward, int accuracy) {
+        if (this.mob instanceof GroundSpiderEntity spider && !positions.isEmpty()) {
+            Vec3 start = this.getTempMobPos();
+            BlockPos target = positions.iterator().next();
+            Path path = meshFinder.findPath(spider, start, target);
+            return path;
+        }
+        return null;
+    }
+
     // ---------- ENTRY POINT (only this override is required on 1.19.2) ----------
     @Override
     public boolean moveTo(Path path, double speed) {
@@ -51,11 +72,39 @@ public class ClimberPathNavigator extends GroundPathNavigation {
     // ---------- FOLLOW LOOP ----------
     @Override
     protected void followThePath() {
+        Vec3 mobPos = getTempMobPos();
+        meshFinder.tick(mobPos);
+
+        Entity target = this.mob.getTarget();
+        if (target != null && this.mob instanceof GroundSpiderEntity spider && this.nodeEvaluator instanceof ClimberNodeEvaluator eval) {
+            Vec3 targetPos = new Vec3(target.getX(), target.getY() + target.getBbHeight() * 0.5D, target.getZ());
+
+            if (ThetaStar.hasSurfaceLineOfSight(spider, this.level, eval, mobPos, targetPos)) {
+                this.mob.getMoveControl().setWantedPosition(targetPos.x, targetPos.y, targetPos.z, this.speedModifier);
+                this.lastTargetPos = targetPos;
+                this.path = null;
+                return;
+            }
+
+            if (this.path == null || this.isDone() || targetPos.distanceToSqr(this.lastTargetPos) > 1.0) {
+                if (pendingPath == null) {
+                    pendingPath = meshFinder.findPathAsync(spider, mobPos, BlockPos.containing(targetPos));
+                }
+                this.lastTargetPos = targetPos;
+            }
+            if (pendingPath != null && pendingPath.isDone()) {
+                Path newPath = pendingPath.join();
+                pendingPath = null;
+                if (newPath != null) {
+                    this.path = newPath;
+                    snapToFirstNodeIfNeeded(newPath);
+                }
+            }
+        }
+
         if (this.path == null || this.isDone()) return;
 
-        Vec3 mobPos = getTempMobPos();
         float advance = Math.max(0.4F, this.mob.getBbWidth() * 0.7F);
-
         if (mobPos.distanceToSqr(Vec3.atCenterOf(this.path.getNextNodePos())) < advance * advance) {
             this.path.advance();
         }
@@ -67,6 +116,14 @@ public class ClimberPathNavigator extends GroundPathNavigation {
             }
             this.mob.getMoveControl().setWantedPosition(exact.x, exact.y, exact.z, this.speedModifier);
         }
+    }
+
+    private boolean hasLineOfSight(Vec3 from, Vec3 to) {
+        if (this.mob instanceof GroundSpiderEntity spider && this.nodeEvaluator instanceof ClimberNodeEvaluator eval) {
+            return ThetaStar.hasSurfaceLineOfSight(spider, this.level, eval, from, to);
+        }
+        ClipContext ctx = new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this.mob);
+        return this.level.clip(ctx).getType() == HitResult.Type.MISS;
     }
 
     @Override
@@ -106,6 +163,9 @@ public class ClimberPathNavigator extends GroundPathNavigation {
     }
 
     private Vec3 getExactPathingTarget(Node node) {
+        if (node instanceof ClimberNodeEvaluator.CustomNode cn && !Double.isNaN(cn.px)) {
+            return new Vec3(cn.px, cn.py, cn.pz);
+        }
         BlockPos pos = node.asBlockPos();
         Direction a = (node instanceof ClimberNodeEvaluator.CustomNode cn && cn.attachment != null)
                 ? cn.attachment : Direction.DOWN;

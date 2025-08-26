@@ -57,6 +57,10 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
         public double g = Double.POSITIVE_INFINITY;
         public double h;
         public CustomNode parent;
+        // Precise anchor position for sub-block routing
+        public double px = Double.NaN;
+        public double py = Double.NaN;
+        public double pz = Double.NaN;
 
         public CustomNode(int x, int y, int z) {
             super(x, y, z);
@@ -93,19 +97,84 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
     public List<CustomNode> getRawNeighbors(CustomNode current) {
         Set<CustomNode> out = new HashSet<>();
         BlockPos pos = current.asBlockPos();
-        for (Direction dir : Direction.values()) {
+
+        // Determine the pair of axes that form the tangent plane for the current attachment.
+        Direction attach = current.attachment != null ? current.attachment : Direction.DOWN;
+        Direction axis1, axis2;
+        switch (attach) {
+            case DOWN, UP -> {
+                axis1 = Direction.EAST; // X axis
+                axis2 = Direction.SOUTH; // Z axis
+            }
+            case NORTH, SOUTH -> {
+                axis1 = Direction.EAST; // X axis
+                axis2 = Direction.UP;   // Y axis
+            }
+            case EAST, WEST -> {
+                axis1 = Direction.NORTH; // Z axis
+                axis2 = Direction.UP;    // Y axis
+            }
+            default -> {
+                axis1 = Direction.EAST;
+                axis2 = Direction.SOUTH;
+            }
+        }
+
+        Direction[] tangential = new Direction[]{axis1, axis1.getOpposite(), axis2, axis2.getOpposite()};
+
+        // Cardinal neighbors in the tangent plane
+        for (Direction dir : tangential) {
             BlockPos neighbor = pos.relative(dir);
-            if (dir.getAxis().isVertical()) {
-                tryAddNode(neighbor, false, out);
-            } else {
-                tryAddNode(neighbor, true, out);
+            tryAddNode(neighbor, true, out);
+            // Allow stepping up/down when walking on horizontal surfaces
+            if (attach == Direction.DOWN || attach == Direction.UP) {
                 if (this.mob != null && this.mob.maxUpStep > 0.0F) {
                     tryAddNode(neighbor.above(), true, out);
                 }
                 tryAddNode(neighbor.below(), true, out);
             }
         }
+
+        // Diagonal neighbors within the tangent plane. Avoid cutting corners by
+        // ensuring both adjacent cardinal positions are valid attachments.
+        for (int i = 0; i < tangential.length; i++) {
+            Direction d1 = tangential[i];
+            if (d1 == null) continue;
+            for (int j = i + 1; j < tangential.length; j++) {
+                Direction d2 = tangential[j];
+                if (d2 == null || d1.getAxis() == d2.getAxis()) continue;
+
+                BlockPos adj1 = pos.relative(d1);
+                BlockPos adj2 = pos.relative(d2);
+                if (!isWalkable(adj1) || !isWalkable(adj2)) continue;
+
+                BlockPos diag = adj1.relative(d2);
+                tryAddNode(diag, true, out);
+                if (attach == Direction.DOWN || attach == Direction.UP) {
+                    if (this.mob != null && this.mob.maxUpStep > 0.0F) {
+                        tryAddNode(diag.above(), true, out);
+                    }
+                    tryAddNode(diag.below(), true, out);
+                }
+            }
+        }
+
         return new ArrayList<>(out);
+    }
+
+    private boolean isWalkable(BlockPos pos) {
+        Direction a = findValidAttachment(pos);
+        return a != null && isPositionValidWithAttachment(pos, a);
+    }
+
+    @Override
+    public int getNeighbors(Node[] nodes, Node node) {
+        List<CustomNode> list = getRawNeighbors((CustomNode) node);
+        int i = 0;
+        for (CustomNode n : list) {
+            nodes[i++] = n;
+        }
+        return i;
     }
 
     private void tryAddNode(BlockPos pos, boolean allowDownwardScan, Set<CustomNode> out) {
