@@ -18,6 +18,7 @@ import net.minecraft.world.phys.Vec3;
 import com.horrormods.spiders.entity.ai.nav.NavMeshPathFinder;
 import com.horrormods.spiders.entity.ai.ThetaStar;
 
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public class ClimberPathNavigator extends GroundPathNavigation {
@@ -51,15 +52,15 @@ public class ClimberPathNavigator extends GroundPathNavigation {
     }
 
     @Override
-    protected Path createPath(ImmutableSet<BlockPos> positions, int maxVisited, boolean offsetUpward, int accuracy) {
-        if (this.mob instanceof GroundSpiderEntity spider && !positions.isEmpty()) {
+    protected Path createPath(Set<BlockPos> positions, int maxVisited, boolean offsetUpward, int accuracy) {
+        if (this.mob instanceof GroundSpiderEntity spider && positions != null && !positions.isEmpty()) {
             Vec3 start = this.getTempMobPos();
             BlockPos target = positions.iterator().next();
-            Path path = meshFinder.findPath(spider, start, target);
-            return path;
+            return meshFinder.findPath(spider, start, target);
         }
         return null;
     }
+
 
     // ---------- ENTRY POINT (only this override is required on 1.19.2) ----------
     @Override
@@ -88,7 +89,8 @@ public class ClimberPathNavigator extends GroundPathNavigation {
 
             if (this.path == null || this.isDone() || targetPos.distanceToSqr(this.lastTargetPos) > 1.0) {
                 if (pendingPath == null) {
-                    pendingPath = meshFinder.findPathAsync(spider, mobPos, BlockPos.containing(targetPos));
+                    pendingPath = meshFinder.findPathAsync(spider, mobPos, new BlockPos(targetPos));
+
                 }
                 this.lastTargetPos = targetPos;
             }

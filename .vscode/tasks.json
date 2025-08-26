@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Client",
+      "type": "process",
+      "command": "gradlew.bat",
+      "args": ["runClient"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Server",
+      "type": "process",
+      "command": "gradlew.bat",
+      "args": ["runServer"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Client (Debug)",
+      "type": "process",
+      "command": "gradlew.bat",
+      "args": ["runClient", "--debug-jvm"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}
+
+
+
+
+

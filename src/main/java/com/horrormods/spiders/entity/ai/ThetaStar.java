@@ -3,6 +3,7 @@ package com.horrormods.spiders.entity.ai;
 import com.horrormods.spiders.entity.GroundSpiderEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Vec3i;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.PathNavigationRegion;
@@ -32,9 +33,9 @@ public class ThetaStar {
      * routing. Returns {@code null} when no path could be discovered.
      */
     public static Path find(GroundSpiderEntity spider, Level level,
-                             Vec3 start, Vec3 goal) {
-        BlockPos startPos = BlockPos.containing(start);
-        BlockPos goalPos = BlockPos.containing(goal);
+                            Vec3 start, Vec3 goal) {
+        BlockPos startPos = new BlockPos(Mth.floor(start.x), Mth.floor(start.y), Mth.floor(start.z));
+        BlockPos goalPos  = new BlockPos(Mth.floor(goal.x),  Mth.floor(goal.y),  Mth.floor(goal.z));
         AABB bounds = new AABB(startPos, goalPos).inflate(32);
         BlockPos c1 = new BlockPos(bounds.minX, bounds.minY, bounds.minZ);
         BlockPos c2 = new BlockPos(bounds.maxX, bounds.maxY, bounds.maxZ);
@@ -114,9 +115,9 @@ public class ThetaStar {
 
     /** Convenience overload accepting block positions. */
     public static Path find(GroundSpiderEntity spider, Level level,
-                             BlockPos startPos, BlockPos goalPos) {
+                            BlockPos startPos, BlockPos goalPos) {
         Vec3 start = new Vec3(startPos.getX() + 0.5, startPos.getY() + 0.5, startPos.getZ() + 0.5);
-        Vec3 goal = new Vec3(goalPos.getX() + 0.5, goalPos.getY() + 0.5, goalPos.getZ() + 0.5);
+        Vec3 goal  = new Vec3(goalPos.getX()  + 0.5, goalPos.getY()  + 0.5, goalPos.getZ()  + 0.5);
         return find(spider, level, start, goal);
     }
 
@@ -130,7 +131,7 @@ public class ThetaStar {
     private static ClimberNodeEvaluator.CustomNode makeNode(Vec3 vec,
                                                             ClimberNodeEvaluator eval,
                                                             GroundSpiderEntity spider) {
-        BlockPos pos = BlockPos.containing(vec);
+        BlockPos pos = new BlockPos(Mth.floor(vec.x), Mth.floor(vec.y), Mth.floor(vec.z));
         Direction a = eval.findValidAttachment(pos);
         if (a == null || !eval.isPositionValidWithAttachment(pos, a)) return null;
         ClimberNodeEvaluator.CustomNode n =
@@ -155,16 +156,14 @@ public class ThetaStar {
 
     /** Performs collision and surface support checks along the segment. */
     public static boolean hasSurfaceLineOfSight(GroundSpiderEntity spider, Level level,
-                                               ClimberNodeEvaluator eval,
-                                               Vec3 start, Vec3 end) {
+                                                ClimberNodeEvaluator eval,
+                                                Vec3 start, Vec3 end) {
         ClipContext ctx = new ClipContext(start, end, ClipContext.Block.COLLIDER,
                 ClipContext.Fluid.NONE, spider);
         if (level != null && level.clip(ctx).getType() != HitResult.Type.MISS) return false;
 
         Vec3 diff = end.subtract(start);
         double len = diff.length();
-        // Sample density scales with the spider's size and segment length to avoid
-        // slipping through narrow gaps or skipping over short obstacles.
         double body = Math.min(spider.getBbWidth(), spider.getBbHeight());
         double stepLen = Math.min(Mth.clamp(body / 3.0, 0.1, 0.5), len / 10.0);
         int steps = Mth.clamp(Mth.ceil(len / stepLen), 1, 2048);
@@ -173,15 +172,18 @@ public class ThetaStar {
         BlockPos.MutableBlockPos bp = new BlockPos.MutableBlockPos();
         Direction prev = null;
         for (int i = 0; i <= steps; i++) {
-            bp.set(pos.x, pos.y, pos.z);
+            bp.set(Mth.floor(pos.x), Mth.floor(pos.y), Mth.floor(pos.z));
             Direction at = eval.findValidAttachment(bp);
             if (at == null || !eval.isPositionValidWithAttachment(bp, at)) {
                 return false;
             }
-            // Abort if the surface abruptly flips (e.g., floor to ceiling
-            // without an intermediary wall), which would cause a mid-air step.
-            if (prev != null && prev.getNormal().dot(at.getNormal()) < -0.5F) {
-                return false;
+            if (prev != null) {
+                Vec3i p = prev.getNormal();
+                Vec3i q = at.getNormal();
+                int dot = p.getX() * q.getX() + p.getY() * q.getY() + p.getZ() * q.getZ();
+                if (dot < -1) { // -1 means vectors point opposite on unit axis
+                    return false;
+                }
             }
             prev = at;
             pos = pos.add(step);
@@ -211,7 +213,6 @@ public class ThetaStar {
             case SOUTH -> new Vec3(cx, cy, pos.getZ() +       halfW + eps);
             case WEST  -> new Vec3(pos.getX() + 1.0 - halfW - eps, cy, cz);
             case EAST  -> new Vec3(pos.getX() +       halfW + eps, cy, cz);
-            default    -> new Vec3(cx, pos.getY() + halfH, cz);
         };
         if (node instanceof ClimberNodeEvaluator.CustomNode cn) {
             cn.px = anchor.x;

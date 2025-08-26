@@ -4,6 +4,7 @@ import com.horrormods.spiders.entity.GroundSpiderEntity;
 import com.horrormods.spiders.entity.ai.ClimberNodeEvaluator;
 import com.horrormods.spiders.entity.ai.ThetaStar;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -75,8 +76,9 @@ public class NavMeshPathFinder {
             return new Path(nodes, goal, true);
         }
 
-        // Gather polygons from a coarse chunk path between start and goal
-        ChunkPos startChunk = new ChunkPos(startPos);
+// Gather polygons from a coarse chunk path between start and goal
+        BlockPos startBlockPos = new BlockPos(start.x, start.y, start.z);
+        ChunkPos startChunk = new ChunkPos(startBlockPos);
         ChunkPos goalChunk = new ChunkPos(goal);
 
         List<ChunkPos> chunkRoute = findChunkRoute(startChunk, goalChunk, 4);

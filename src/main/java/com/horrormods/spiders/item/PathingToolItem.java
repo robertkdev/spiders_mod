@@ -5,6 +5,7 @@ import com.horrormods.spiders.entity.ai.ThetaStar;
 import com.horrormods.spiders.network.DisplayPathPacket;
 import com.horrormods.spiders.network.PacketHandler;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
