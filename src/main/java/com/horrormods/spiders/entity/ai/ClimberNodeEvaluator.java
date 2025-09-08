@@ -178,6 +178,21 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
                 }
             }
         }
+
+        // Corner-wrap moves: step tangentially then around the corner to an
+        // orthogonal face. These allow transitioning from one surface to an
+        // adjacent perpendicular surface without passing through solid blocks.
+        Direction outward = attach.getOpposite();
+        for (Direction t : tangential) {
+            if (t == null) continue;
+            BlockPos corner = pos.relative(t).relative(outward);
+            // The new supporting face is the direction of the tangential step.
+            Direction newAttach = t;
+            EnumSet<Direction> supports = findAttachments(corner);
+            if (supports.contains(newAttach) && isPositionValidWithAttachment(corner, newAttach)) {
+                out.add((CustomNode) getNode(corner, newAttach));
+            }
+        }
         EnumSet<Direction> here = findAttachments(pos);
         for (Direction dir : here) {
             if (dir != attach && isPositionValidWithAttachment(pos, dir)) {
