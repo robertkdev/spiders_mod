@@ -25,13 +25,13 @@ public class ClimberNodeEvaluatorTest {
         }
 
         @Override
-        public EnumSet<Direction> findValidAttachments(BlockPos pos) {
+        public EnumSet<Direction> findAttachments(BlockPos pos) {
             return attachments.getOrDefault(pos, EnumSet.noneOf(Direction.class));
         }
 
         @Override
         public boolean isPositionValidWithAttachment(BlockPos pos, Direction a) {
-            return findValidAttachments(pos).contains(a);
+            return findAttachments(pos).contains(a);
         }
 
         @Override
@@ -74,7 +74,7 @@ public class ClimberNodeEvaluatorTest {
                 }
             }
 
-            EnumSet<Direction> here = findValidAttachments(pos);
+            EnumSet<Direction> here = findAttachments(pos);
             for (Direction d : here) {
                 if (d != attach) {
                     out.add((CustomNode) getNode(pos, d));
@@ -85,7 +85,7 @@ public class ClimberNodeEvaluatorTest {
         }
 
         private void simpleAdd(BlockPos p, Set<CustomNode> out) {
-            EnumSet<Direction> dirs = findValidAttachments(p);
+            EnumSet<Direction> dirs = findAttachments(p);
             for (Direction d : dirs) {
                 out.add((CustomNode) getNode(p, d));
             }
@@ -115,6 +115,16 @@ public class ClimberNodeEvaluatorTest {
         eval.put(new BlockPos(1, 0, 0), Direction.WEST);
         var start = (ClimberNodeEvaluator.CustomNode) eval.getNode(new BlockPos(0, 0, 0), Direction.DOWN);
         var goal = (ClimberNodeEvaluator.CustomNode) eval.getNode(new BlockPos(1, 0, 0), Direction.WEST);
+        Assertions.assertTrue(reachable(eval, start, goal));
+    }
+
+    @Test
+    public void testWallToCeilingPath() {
+        TestEvaluator eval = new TestEvaluator();
+        eval.put(new BlockPos(1, 0, 0), Direction.WEST);
+        eval.put(new BlockPos(1, 1, 0), Direction.WEST, Direction.UP);
+        var start = (ClimberNodeEvaluator.CustomNode) eval.getNode(new BlockPos(1, 0, 0), Direction.WEST);
+        var goal = (ClimberNodeEvaluator.CustomNode) eval.getNode(new BlockPos(1, 1, 0), Direction.UP);
         Assertions.assertTrue(reachable(eval, start, goal));
     }
 
