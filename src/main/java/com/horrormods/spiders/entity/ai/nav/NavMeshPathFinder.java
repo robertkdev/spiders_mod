@@ -14,6 +14,7 @@ import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.util.Mth;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -71,8 +72,11 @@ public class NavMeshPathFinder {
 
         if (ThetaStar.hasSurfaceLineOfSight(spider, level, eval, start, goalCenter)) {
             List<Node> nodes = new ArrayList<>();
-            nodes.add(new Node((int) Math.floor(start.x), (int) Math.floor(start.y), (int) Math.floor(start.z)));
-            nodes.add(new Node(goal.getX(), goal.getY(), goal.getZ()));
+            ClimberNodeEvaluator.CustomNode startNode = makeNode(eval, start);
+            ClimberNodeEvaluator.CustomNode goalNode = makeNode(eval, goalCenter);
+            if (startNode == null || goalNode == null) return null;
+            nodes.add(startNode);
+            nodes.add(goalNode);
             return new Path(nodes, goal, true);
         }
 
@@ -152,7 +156,9 @@ public class NavMeshPathFinder {
         if (goalRec == null) return null;
 
         List<Node> nodes = new ArrayList<>();
-        nodes.add(new Node((int) Math.floor(start.x), (int) Math.floor(start.y), (int) Math.floor(start.z)));
+        ClimberNodeEvaluator.CustomNode startNode = makeNode(eval, start);
+        if (startNode == null) return null;
+        nodes.add(startNode);
 
         List<SurfaceNavMesh.Polygon> chain = new ArrayList<>();
         Record r = goalRec;
@@ -161,11 +167,44 @@ public class NavMeshPathFinder {
             r = r.parent;
         }
         for (SurfaceNavMesh.Polygon p : chain) {
-            nodes.add(new Node((int) Math.floor(p.centre.x), (int) Math.floor(p.centre.y), (int) Math.floor(p.centre.z)));
+            ClimberNodeEvaluator.CustomNode pn = (ClimberNodeEvaluator.CustomNode) eval.getNode(new BlockPos(Mth.floor(p.centre.x), Mth.floor(p.centre.y), Mth.floor(p.centre.z)), p.normal.getOpposite());
+            pn.px = p.centre.x;
+            pn.py = p.centre.y;
+            pn.pz = p.centre.z;
+            nodes.add(pn);
         }
-        nodes.add(new Node(goal.getX(), goal.getY(), goal.getZ()));
+        ClimberNodeEvaluator.CustomNode goalNode = makeNode(eval, goalCenter);
+        if (goalNode == null) return null;
+        nodes.add(goalNode);
 
         return new Path(nodes, goal, true);
+    }
+
+    private static ClimberNodeEvaluator.CustomNode makeNode(ClimberNodeEvaluator eval, Vec3 vec) {
+        BlockPos pos = new BlockPos(Mth.floor(vec.x), Mth.floor(vec.y), Mth.floor(vec.z));
+        EnumSet<Direction> dirs = eval.findAttachments(pos);
+        if (dirs.isEmpty()) return null;
+        Direction guess = Direction.getNearest(
+                vec.x - (pos.getX() + 0.5),
+                vec.y - (pos.getY() + 0.5),
+                vec.z - (pos.getZ() + 0.5));
+        Direction a = null;
+        if (dirs.contains(guess) && eval.isPositionValidWithAttachment(pos, guess)) {
+            a = guess;
+        } else {
+            for (Direction d : dirs) {
+                if (eval.isPositionValidWithAttachment(pos, d)) {
+                    a = d;
+                    break;
+                }
+            }
+        }
+        if (a == null) return null;
+        ClimberNodeEvaluator.CustomNode node = (ClimberNodeEvaluator.CustomNode) eval.getNode(pos, a);
+        node.px = vec.x;
+        node.py = vec.y;
+        node.pz = vec.z;
+        return node;
     }
 
     /** Breadth-first search across chunks to obtain a high level route. */
