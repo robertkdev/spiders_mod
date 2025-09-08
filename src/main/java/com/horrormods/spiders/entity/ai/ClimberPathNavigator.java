@@ -140,7 +140,7 @@ public class ClimberPathNavigator extends GroundPathNavigation {
     }
     @Override public boolean isStableDestination(BlockPos pos) {
         if (this.nodeEvaluator instanceof ClimberNodeEvaluator eval) {
-            return eval.findValidAttachment(pos) != null;
+            return !eval.findValidAttachments(pos).isEmpty();
         }
         return super.isStableDestination(pos);
     }
