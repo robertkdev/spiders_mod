@@ -132,11 +132,15 @@ public class ThetaStar {
                                                             ClimberNodeEvaluator eval,
                                                             GroundSpiderEntity spider) {
         BlockPos pos = new BlockPos(Mth.floor(vec.x), Mth.floor(vec.y), Mth.floor(vec.z));
-        Direction a = eval.findValidAttachment(pos);
-        if (a == null || !eval.isPositionValidWithAttachment(pos, a)) return null;
-        ClimberNodeEvaluator.CustomNode n =
-                (ClimberNodeEvaluator.CustomNode) eval.getNode(pos.getX(), pos.getY(), pos.getZ());
-        n.attachment = a;
+        EnumSet<Direction> dirs = eval.findValidAttachments(pos);
+        if (dirs.isEmpty()) return null;
+        Direction guess = Direction.getNearest(
+                vec.x - (pos.getX() + 0.5),
+                vec.y - (pos.getY() + 0.5),
+                vec.z - (pos.getZ() + 0.5));
+        Direction a = dirs.contains(guess) ? guess : dirs.iterator().next();
+        if (!eval.isPositionValidWithAttachment(pos, a)) return null;
+        ClimberNodeEvaluator.CustomNode n = (ClimberNodeEvaluator.CustomNode) eval.getNode(pos, a);
         n.g = Double.POSITIVE_INFINITY;
         n.parent = null;
         n.px = vec.x;
@@ -173,8 +177,17 @@ public class ThetaStar {
         Direction prev = null;
         for (int i = 0; i <= steps; i++) {
             bp.set(Mth.floor(pos.x), Mth.floor(pos.y), Mth.floor(pos.z));
-            Direction at = eval.findValidAttachment(bp);
-            if (at == null || !eval.isPositionValidWithAttachment(bp, at)) {
+            EnumSet<Direction> set = eval.findValidAttachments(bp);
+            if (set.isEmpty()) {
+                return false;
+            }
+            Direction at;
+            if (prev != null && set.contains(prev)) {
+                at = prev;
+            } else {
+                at = set.iterator().next();
+            }
+            if (!eval.isPositionValidWithAttachment(bp, at)) {
                 return false;
             }
             if (prev != null) {

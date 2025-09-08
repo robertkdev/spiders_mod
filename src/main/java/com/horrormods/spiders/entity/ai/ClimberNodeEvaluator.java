@@ -1,6 +1,5 @@
 package com.horrormods.spiders.entity.ai;
 
-import com.horrormods.spiders.entity.util.AttachmentHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Mob;
@@ -20,6 +19,7 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
 
     private final EnumSet<Direction> allowed = EnumSet.of(Direction.DOWN);
     private boolean startPathOnGround = true;
+    private final Map<Long, EnumMap<Direction, CustomNode>> nodeMap = new HashMap<>();
 
     public void setStartPathOnGround(boolean start) {
         this.startPathOnGround = start;
@@ -45,15 +45,22 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
     public void prepare(PathNavigationRegion region, Mob mob) {
         super.prepare(region, mob);
         this.nodes.clear();
+        this.nodeMap.clear();
     }
 
     @Override
     public Node getNode(int x, int y, int z) {
-        return this.nodes.computeIfAbsent(Node.createHash(x, y, z), key -> new CustomNode(x, y, z));
+        return getNode(new BlockPos(x, y, z), Direction.DOWN);
+    }
+
+    public Node getNode(BlockPos pos, Direction dir) {
+        long key = Node.createHash(pos.getX(), pos.getY(), pos.getZ());
+        EnumMap<Direction, CustomNode> dirMap = this.nodeMap.computeIfAbsent(key, k -> new EnumMap<>(Direction.class));
+        return dirMap.computeIfAbsent(dir, d -> new CustomNode(pos.getX(), pos.getY(), pos.getZ(), d));
     }
 
     public static class CustomNode extends Node {
-        public Direction attachment;
+        public final Direction attachment;
         public double g = Double.POSITIVE_INFINITY;
         public double h;
         public CustomNode parent;
@@ -62,11 +69,24 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
         public double py = Double.NaN;
         public double pz = Double.NaN;
 
-        public CustomNode(int x, int y, int z) {
+        public CustomNode(int x, int y, int z, Direction attachment) {
             super(x, y, z);
+            this.attachment = attachment;
         }
         public BlockPos asBlockPos() {
             return new BlockPos(this.x, this.y, this.z);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof CustomNode cn)) return false;
+            return this.x == cn.x && this.y == cn.y && this.z == cn.z && this.attachment == cn.attachment;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(this.x, this.y, this.z, this.attachment);
         }
     }
 
@@ -75,11 +95,11 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
         if (this.mob == null) return null;
         BlockPos here = this.mob.blockPosition();
         if (!startPathOnGround) {
-            Direction a = findValidAttachment(here);
-            if (a != null && isPositionValidWithAttachment(here, a)) {
-                CustomNode start = (CustomNode) getNode(here);
-                start.attachment = a;
-                return start;
+            EnumSet<Direction> dirs = findValidAttachments(here);
+            for (Direction a : dirs) {
+                if (isPositionValidWithAttachment(here, a)) {
+                    return getNode(here, a);
+                }
             }
         }
         return super.getStart();
@@ -88,7 +108,7 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
     @Override
     public BlockPathTypes getBlockPathType(BlockGetter level, int x, int y, int z) {
         BlockPathTypes type = super.getBlockPathType(level, x, y, z);
-        if (type == BlockPathTypes.OPEN && findValidAttachment(new BlockPos(x,y,z)) != null) {
+        if (type == BlockPathTypes.OPEN && !findValidAttachments(new BlockPos(x, y, z)).isEmpty()) {
             return BlockPathTypes.WALKABLE;
         }
         return type;
@@ -158,13 +178,22 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
                 }
             }
         }
+        EnumSet<Direction> here = findValidAttachments(pos);
+        for (Direction dir : here) {
+            if (dir != attach && isPositionValidWithAttachment(pos, dir)) {
+                out.add((CustomNode) getNode(pos, dir));
+            }
+        }
 
         return new ArrayList<>(out);
     }
 
     private boolean isWalkable(BlockPos pos) {
-        Direction a = findValidAttachment(pos);
-        return a != null && isPositionValidWithAttachment(pos, a);
+        EnumSet<Direction> dirs = findValidAttachments(pos);
+        for (Direction a : dirs) {
+            if (isPositionValidWithAttachment(pos, a)) return true;
+        }
+        return false;
     }
 
     @Override
@@ -178,24 +207,24 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
     }
 
     private void tryAddNode(BlockPos pos, boolean allowDownwardScan, Set<CustomNode> out) {
-        Direction a = findValidAttachment(pos);
-        if (a != null && isPositionValidWithAttachment(pos, a)) {
-            CustomNode n = (CustomNode) getNode(pos);
-            n.attachment = a;
-            out.add(n);
-            return;
+        EnumSet<Direction> dirs = findValidAttachments(pos);
+        for (Direction a : dirs) {
+            if (isPositionValidWithAttachment(pos, a)) {
+                out.add((CustomNode) getNode(pos, a));
+            }
         }
+        if (!dirs.isEmpty()) return;
         if (allowDownwardScan && this.level.getBlockState(pos).isAir()) {
             BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos(pos.getX(), pos.getY(), pos.getZ());
             int maxFall = this.mob != null ? this.mob.getMaxFallDistance() : 4;
             for (int i = 0; i < maxFall; i++) {
                 m.move(Direction.DOWN);
                 if (!this.level.getBlockState(m).isAir()) {
-                    Direction land = findValidAttachment(m);
-                    if (land != null && isPositionValidWithAttachment(m, land)) {
-                        CustomNode n = (CustomNode) getNode(m);
-                        n.attachment = land;
-                        out.add(n);
+                    EnumSet<Direction> landDirs = findValidAttachments(m);
+                    for (Direction land : landDirs) {
+                        if (isPositionValidWithAttachment(m, land)) {
+                            out.add((CustomNode) getNode(new BlockPos(m), land));
+                        }
                     }
                     return;
                 }
@@ -223,14 +252,14 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
         return this.level.noCollision(this.mob, box);
     }
 
-    @Nullable
-    public Direction findValidAttachment(BlockPos pos) {
+    public EnumSet<Direction> findValidAttachments(BlockPos pos) {
+        EnumSet<Direction> dirs = EnumSet.noneOf(Direction.class);
         for (Direction d : allowed) {
             BlockPos support = pos.relative(d);
             if (this.level != null && !this.level.getBlockState(support).getCollisionShape(this.level, support).isEmpty()) {
-                return d;
+                dirs.add(d);
             }
         }
-        return null;
+        return dirs;
     }
 }
