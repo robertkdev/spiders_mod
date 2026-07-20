@@ -1,0 +1,15 @@
+{
+  "variants": {
+    "axis=x": {
+      "model": "spiders:block/single_thread_web"
+    },
+    "axis=y": {
+      "model": "spiders:block/single_thread_web",
+      "x": 90
+    },
+    "axis=z": {
+      "model": "spiders:block/single_thread_web",
+      "y": 90
+    }
+  }
+}

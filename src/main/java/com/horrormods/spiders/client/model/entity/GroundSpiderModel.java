@@ -10,6 +10,9 @@ import software.bernie.geckolib3.model.AnimatedGeoModel;
 import software.bernie.geckolib3.model.provider.data.EntityModelData;
 
 public class GroundSpiderModel extends AnimatedGeoModel<GroundSpiderEntity> {
+    private static final float HEAD_YAW_LIMIT_DEGREES = 65.0F;
+    private static final float HEAD_PITCH_LIMIT_DEGREES = 35.0F;
+
     @Override
     public ResourceLocation getAnimationResource(GroundSpiderEntity entity) {
         return EntityResources.SPIDER_ANIMATIONS;
@@ -42,10 +45,10 @@ public class GroundSpiderModel extends AnimatedGeoModel<GroundSpiderEntity> {
 
         // Check that the head bone is not null
         if (head != null) {
-            // Apply the head rotation from the entity's look controller
-            // We convert the degrees from the entity data to radians for the model
-            head.setRotationX(extraData.headPitch * Mth.DEG_TO_RAD);
-            head.setRotationY(extraData.netHeadYaw * Mth.DEG_TO_RAD);
+            float headPitch = Mth.clamp(extraData.headPitch, -HEAD_PITCH_LIMIT_DEGREES, HEAD_PITCH_LIMIT_DEGREES);
+            float headYaw = Mth.clamp(extraData.netHeadYaw, -HEAD_YAW_LIMIT_DEGREES, HEAD_YAW_LIMIT_DEGREES);
+            head.setRotationX(headPitch * Mth.DEG_TO_RAD);
+            head.setRotationY(headYaw * Mth.DEG_TO_RAD);
         }
     }
 }

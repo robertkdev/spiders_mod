@@ -1,6 +1,5 @@
-package com.horrormods.spiders.ai;
+package com.horrormods.spiders.entity.ai.nav;
 
-import com.horrormods.spiders.entity.ai.nav.NavMeshManager;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Assertions;

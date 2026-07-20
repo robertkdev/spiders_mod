@@ -44,11 +44,11 @@ public class ClimberNodeEvaluatorTest {
         List<CustomNode> neighbors = eval.getRawNeighbors(startNode);
 
         CustomNode expected = (CustomNode) eval.getNode(corner, Direction.EAST);
-        assertTrue("Corner-wrap neighbor missing", neighbors.contains(expected));
+        assertTrue(neighbors.contains(expected), "Corner-wrap neighbor missing");
         assertEquals(Direction.EAST, expected.attachment);
 
         // Ensure movement didn't simply cross through the wall block
         CustomNode straight = (CustomNode) eval.getNode(start.relative(Direction.EAST), Direction.NORTH);
-        assertFalse("Should not move straight through solid blocks", neighbors.contains(straight));
+        assertFalse(neighbors.contains(straight), "Should not move straight through solid blocks");
     }
 }
