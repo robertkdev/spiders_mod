@@ -1,7 +1,9 @@
 package com.horrormods.spiders;
 
 import com.horrormods.spiders.client.ClientPathManager;
+import com.horrormods.spiders.client.renderer.blockentity.SingleThreadWebRenderer;
 import com.horrormods.spiders.client.renderer.entity.GroundSpiderRenderer;
+import com.horrormods.spiders.registry.BlockEntityRegistry;
 import com.horrormods.spiders.registry.EntityRegistry;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -10,6 +12,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.entity.ThrownItemRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
@@ -76,7 +79,9 @@ public class ClientListener {
     public static class ModBusEvents {
         @SubscribeEvent
         public static void registerRenderers(final EntityRenderersEvent.RegisterRenderers event) {
+            event.registerBlockEntityRenderer(BlockEntityRegistry.SINGLE_THREAD_WEB.get(), SingleThreadWebRenderer::new);
             event.registerEntityRenderer(EntityRegistry.GROUND_SPIDER.get(), GroundSpiderRenderer::new);
+            event.registerEntityRenderer(EntityRegistry.WEB_SHOT.get(), ThrownItemRenderer::new);
         }
     }
 }

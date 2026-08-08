@@ -10,7 +10,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Manages streaming nav‑mesh chunks in and out of memory.
@@ -20,7 +20,7 @@ import java.util.concurrent.*;
  * <ul>
  *   <li>basic polygon merging to cut node counts</li>
  *   <li>surface validation that rejects thin blocks or low‑clearance overhangs</li>
- *   <li>asynchronous chunk building and timed eviction</li>
+ *   <li>server-thread chunk building and timed eviction</li>
  *   <li>incremental rebuild hooks for world changes</li>
  * </ul>
  */
@@ -28,23 +28,22 @@ public class NavMeshManager {
 
     /** Simple cache entry containing the mesh and last access time. */
     private static class Entry {
-        final CompletableFuture<SurfaceNavMesh> meshFuture;
+        final SurfaceNavMesh mesh;
         volatile long lastAccess;
-        Entry(CompletableFuture<SurfaceNavMesh> meshFuture) {
-            this.meshFuture = meshFuture;
+        Entry(SurfaceNavMesh mesh) {
+            this.mesh = mesh;
             this.lastAccess = System.currentTimeMillis();
         }
     }
 
     private final Map<ChunkPos, Entry> cache = new ConcurrentHashMap<>();
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
 
-    /** Returns the nav mesh for the given chunk, building it asynchronously on demand. */
+    /** Returns the nav mesh for the given chunk. Build on the server thread; Level access is not thread-safe. */
     public SurfaceNavMesh get(Level level, ChunkPos pos) {
         Entry entry = cache.computeIfAbsent(pos, p ->
-                new Entry(CompletableFuture.supplyAsync(() -> buildChunk(level, p), executor)));
+                new Entry(buildChunk(level, p)));
         entry.lastAccess = System.currentTimeMillis();
-        return entry.meshFuture.join();
+        return entry.mesh;
     }
 
     /** Checks and evicts meshes that are far away or stale. */
@@ -58,7 +57,6 @@ public class NavMeshManager {
             ChunkPos cp = e.getKey();
             if (Math.abs(cp.x - centreChunkX) > radius || Math.abs(cp.z - centreChunkZ) > radius
                     || now - e.getValue().lastAccess > 30_000) {
-                e.getValue().meshFuture.cancel(false);
                 it.remove();
             }
         }
@@ -67,18 +65,11 @@ public class NavMeshManager {
     /** Rebuilds the mesh for the chunk containing {@code changed} on the next query. */
     public void onBlockChanged(Level level, BlockPos changed) {
         ChunkPos pos = new ChunkPos(changed);
-        Entry e = cache.remove(pos);
-        if (e != null) {
-            e.meshFuture.cancel(false);
-        }
-        // rebuild asynchronously so next get() will produce an updated mesh
-        cache.computeIfAbsent(pos, p ->
-                new Entry(CompletableFuture.supplyAsync(() -> buildChunk(level, p), executor)));
+        cache.remove(pos);
     }
 
     /** Clears all loaded mesh data. */
     public void clear() {
-        cache.values().forEach(e -> e.meshFuture.cancel(false));
         cache.clear();
     }
 
@@ -87,7 +78,7 @@ public class NavMeshManager {
 
     // Visible for testing
     void insertTestEntry(ChunkPos pos) {
-        cache.put(pos, new Entry(CompletableFuture.completedFuture(new SurfaceNavMesh(List.of()))));
+        cache.put(pos, new Entry(new SurfaceNavMesh(List.of())));
     }
 
     /**

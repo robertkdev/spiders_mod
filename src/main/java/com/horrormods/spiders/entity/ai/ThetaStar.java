@@ -1,6 +1,7 @@
 package com.horrormods.spiders.entity.ai;
 
 import com.horrormods.spiders.entity.GroundSpiderEntity;
+import com.horrormods.spiders.entity.util.AttachmentHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
@@ -34,6 +35,11 @@ public class ThetaStar {
      */
     public static Path find(GroundSpiderEntity spider, Level level,
                             Vec3 start, Vec3 goal) {
+        return find(spider, level, start, goal, 10000);
+    }
+
+    public static Path find(GroundSpiderEntity spider, Level level,
+                            Vec3 start, Vec3 goal, int maxIterations) {
         BlockPos startPos = new BlockPos(Mth.floor(start.x), Mth.floor(start.y), Mth.floor(start.z));
         BlockPos goalPos  = new BlockPos(Mth.floor(goal.x),  Mth.floor(goal.y),  Mth.floor(goal.z));
         AABB bounds = new AABB(startPos, goalPos).inflate(32);
@@ -46,8 +52,8 @@ public class ThetaStar {
         eval.setCanPathCeiling(true);
         eval.prepare(region, spider);
 
-        ClimberNodeEvaluator.CustomNode startNode = makeNode(start, eval, spider);
-        ClimberNodeEvaluator.CustomNode goalNode  = makeNode(goal,  eval, spider);
+        ClimberNodeEvaluator.CustomNode startNode = makeNode(spider, start, eval, spider.getAttachmentDirection());
+        ClimberNodeEvaluator.CustomNode goalNode  = makeNode(spider, goal, eval, null);
         if (startNode == null || goalNode == null) return null;
 
         PriorityQueue<ClimberNodeEvaluator.CustomNode> open =
@@ -60,7 +66,7 @@ public class ThetaStar {
         open.add(startNode);
 
         int iterations = 0;
-        while (!open.isEmpty() && iterations++ < 10000) {
+        while (!open.isEmpty() && iterations++ < maxIterations) {
             ClimberNodeEvaluator.CustomNode current = open.poll();
             if (current.equals(goalNode)) {
                 goalNode = current;
@@ -128,9 +134,10 @@ public class ThetaStar {
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    private static ClimberNodeEvaluator.CustomNode makeNode(Vec3 vec,
+    private static ClimberNodeEvaluator.CustomNode makeNode(GroundSpiderEntity spider,
+                                                            Vec3 vec,
                                                             ClimberNodeEvaluator eval,
-                                                            GroundSpiderEntity spider) {
+                                                            Direction preferred) {
         BlockPos pos = new BlockPos(Mth.floor(vec.x), Mth.floor(vec.y), Mth.floor(vec.z));
         EnumSet<Direction> dirs = eval.findAttachments(pos);
         if (dirs.isEmpty()) return null;
@@ -139,7 +146,9 @@ public class ThetaStar {
                 vec.y - (pos.getY() + 0.5),
                 vec.z - (pos.getZ() + 0.5));
         Direction a = null;
-        if (dirs.contains(guess) && eval.isPositionValidWithAttachment(pos, guess)) {
+        if (preferred != null && dirs.contains(preferred) && eval.isPositionValidWithAttachment(pos, preferred)) {
+            a = preferred;
+        } else if (dirs.contains(guess) && eval.isPositionValidWithAttachment(pos, guess)) {
             a = guess;
         } else {
             for (Direction d : dirs) {
@@ -153,9 +162,10 @@ public class ThetaStar {
         ClimberNodeEvaluator.CustomNode n = (ClimberNodeEvaluator.CustomNode) eval.getNode(pos, a);
         n.g = Double.POSITIVE_INFINITY;
         n.parent = null;
-        n.px = vec.x;
-        n.py = vec.y;
-        n.pz = vec.z;
+        Vec3 anchor = AttachmentHelper.anchorFor(spider, pos, a);
+        n.px = anchor.x;
+        n.py = anchor.y;
+        n.pz = anchor.z;
         return n;
     }
 
@@ -163,6 +173,9 @@ public class ThetaStar {
                                           ClimberNodeEvaluator eval,
                                           ClimberNodeEvaluator.CustomNode a,
                                           ClimberNodeEvaluator.CustomNode b) {
+        if (a.attachment != b.attachment && !a.asBlockPos().equals(b.asBlockPos())) {
+            return false;
+        }
         Vec3 start = anchorFor(spider, a);
         Vec3 end = anchorFor(spider, b);
         return hasSurfaceLineOfSight(spider, level, eval, start, end);
@@ -227,21 +240,7 @@ public class ThetaStar {
         Direction a = (node instanceof ClimberNodeEvaluator.CustomNode cn2 && cn2.attachment != null)
                 ? cn2.attachment : Direction.DOWN;
 
-        double cx = pos.getX() + 0.5;
-        double cy = pos.getY() + 0.5;
-        double cz = pos.getZ() + 0.5;
-        double halfW = e.getBbWidth() / 2.0;
-        double halfH = e.getBbHeight() / 2.0;
-        double eps = 0.03125;
-
-        Vec3 anchor = switch (a) {
-            case DOWN  -> new Vec3(cx, pos.getY() + halfH + eps, cz);
-            case UP    -> new Vec3(cx, pos.getY() + 1.0 - halfH - eps, cz);
-            case NORTH -> new Vec3(cx, cy, pos.getZ() + 1.0 - halfW - eps);
-            case SOUTH -> new Vec3(cx, cy, pos.getZ() +       halfW + eps);
-            case WEST  -> new Vec3(pos.getX() + 1.0 - halfW - eps, cy, cz);
-            case EAST  -> new Vec3(pos.getX() +       halfW + eps, cy, cz);
-        };
+        Vec3 anchor = AttachmentHelper.anchorFor(e, pos, a);
         if (node instanceof ClimberNodeEvaluator.CustomNode cn) {
             cn.px = anchor.x;
             cn.py = anchor.y;

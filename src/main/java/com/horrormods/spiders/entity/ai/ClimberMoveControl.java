@@ -59,6 +59,12 @@ public class ClimberMoveControl extends MoveControl {
             float newPitch = Mth.rotLerp(0.35f, this.mob.getXRot(), targetPitch);
             newPitch = Mth.clamp(newPitch, -85.0F, 85.0F);
             this.mob.setXRot(newPitch);
+
+            if (tangentDir.lengthSqr() > 1.0E-6) {
+                double speed = this.speedModifier * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
+                Vec3 surfaceStep = tangentDir.normalize().scale(speed);
+                this.mob.setDeltaMovement(surfaceStep);
+            }
         }
 
         if (DEBUG) {

@@ -20,6 +20,43 @@ def minecraft_version = '1.19.2'
 def forge_version = '43.2.0'
 def mapping_channel = 'official'
 def mapping_version = '1.19.2'
+def geckolib_version = '3.1.40'
+def geckolib_dependency = "software.bernie.geckolib:geckolib-forge-1.19:${geckolib_version}"
+def geckolib_mapped_version = "${geckolib_version}_mapped_${mapping_channel}_${mapping_version}"
+def geckolib_deobf_runtime_jar = file("${gradle.gradleUserHomeDir}/caches/forge_gradle/deobf_dependencies/software/bernie/geckolib/geckolib-forge-1.19/${geckolib_mapped_version}/geckolib-forge-1.19-${geckolib_mapped_version}.jar")
+
+tasks.register('sanitizeGeckolibDevRuntimeJar', Jar) {
+    group = 'build setup'
+    description = 'Builds a dev-runtime GeckoLib jar without bundled example animation JSON that pollutes animation parsing.'
+    archiveBaseName = 'geckolib-forge-1.19'
+    archiveVersion = "${geckolib_mapped_version}-dev-no-example-animations"
+    destinationDirectory = layout.buildDirectory.dir('sanitized-libs')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from {
+        if (!geckolib_deobf_runtime_jar.exists()) {
+            throw new GradleException("Expected ForgeGradle-deobfuscated GeckoLib jar was not found: ${geckolib_deobf_runtime_jar}")
+        }
+        zipTree(geckolib_deobf_runtime_jar)
+    }
+
+    exclude 'assets/geckolib3/animations/**'
+
+    filesMatching('META-INF/mods.toml') {
+        expand(file: [jarVersion: geckolib_version])
+    }
+
+    manifest {
+        attributes(
+                'Specification-Title': 'GeckoLib',
+                'Specification-Vendor': 'Gecko',
+                'Specification-Version': '1',
+                'Implementation-Title': 'geckolib-forge-1.19',
+                'Implementation-Version': geckolib_version,
+                'Implementation-Vendor': 'Gecko'
+        )
+    }
+}
 
 minecraft {
     mappings channel: mapping_channel, version: mapping_version
@@ -30,6 +67,7 @@ minecraft {
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
             property 'forge.enabledGameTestNamespaces', 'spiders'
+            property 'geckolib.disable_examples', 'true'
             mods {
                 spiders {
                     source sourceSets.main
@@ -42,6 +80,22 @@ minecraft {
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
             property 'forge.enabledGameTestNamespaces', 'spiders'
+            property 'geckolib.disable_examples', 'true'
+            args '--nogui'
+            mods {
+                spiders {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        gameTestServer {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            property 'forge.enabledGameTestNamespaces', 'spiders'
+            property 'geckolib.disable_examples', 'true'
+            args '--nogui'
             mods {
                 spiders {
                     source sourceSets.main
@@ -54,7 +108,8 @@ minecraft {
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    implementation fg.deobf('software.bernie.geckolib:geckolib-forge-1.19:3.1.40')
+    compileOnly fg.deobf(geckolib_dependency)
+    runtimeOnly files(tasks.named('sanitizeGeckolibDevRuntimeJar'))
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.9.3'
 }

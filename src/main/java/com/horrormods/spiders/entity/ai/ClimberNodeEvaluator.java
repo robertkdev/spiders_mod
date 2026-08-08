@@ -185,7 +185,9 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
         Direction outward = attach.getOpposite();
         for (Direction t : tangential) {
             if (t == null) continue;
-            BlockPos corner = pos.relative(t).relative(outward);
+            BlockPos corner = attach.getAxis().isHorizontal() && t.getAxis() == Direction.Axis.Y
+                    ? pos.relative(outward)
+                    : pos.relative(t).relative(outward);
             // The new supporting face is the direction of the tangential step.
             Direction newAttach = t;
             EnumSet<Direction> supports = findAttachments(corner);
@@ -229,7 +231,7 @@ public class ClimberNodeEvaluator extends WalkNodeEvaluator {
             }
         }
         if (!dirs.isEmpty()) return;
-        if (allowDownwardScan && this.level.getBlockState(pos).isAir()) {
+        if (allowDownwardScan && this.level != null && this.level.getBlockState(pos).isAir()) {
             BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos(pos.getX(), pos.getY(), pos.getZ());
             int maxFall = this.mob != null ? this.mob.getMaxFallDistance() : 4;
             for (int i = 0; i < maxFall; i++) {

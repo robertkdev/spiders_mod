@@ -2,6 +2,7 @@ package com.horrormods.spiders.client.renderer.entity;
 
 import com.horrormods.spiders.client.model.entity.GroundSpiderModel;
 import com.horrormods.spiders.entity.GroundSpiderEntity;
+import com.horrormods.spiders.entity.util.GroundSpiderAttachmentPose;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Vector3f;
@@ -38,33 +39,12 @@ public class GroundSpiderRenderer extends GeoEntityRenderer<GroundSpiderEntity> 
         // Save the current matrix state so our rotations don't affect other entities
         poseStack.pushPose();
 
-        // Apply translations and rotations based on the attachment direction
-        // We translate to center the rotation on the entity's body
+        // Apply attachment rotations around the entity body center. The model's
+        // unrotated belly points down, so these rotations point it into the
+        // support surface and leave the back facing open air.
         if (attachment != Direction.DOWN) { // No special rotation needed for walking on the floor
             poseStack.translate(0.0D, entity.getBbHeight() / 2.0, 0.0D);
-
-            switch (attachment) {
-                case UP: // On a ceiling
-                    poseStack.mulPose(Vector3f.XP.rotationDegrees(180.0F));
-                    // May need an additional Y rotation if it looks backwards on the ceiling
-                    // poseStack.mulPose(Vector3f.YP.rotationDegrees(180.0F));
-                    poseStack.translate(0.0D, -entity.getBbHeight() / 2.0, 0.0D); // Adjust position after rotation
-                    break;
-                case NORTH: // On a north-facing wall (entity is facing south)
-                    poseStack.mulPose(Vector3f.XP.rotationDegrees(90.0F));
-                    break;
-                case SOUTH: // On a south-facing wall (entity is facing north)
-                    poseStack.mulPose(Vector3f.XP.rotationDegrees(-90.0F));
-                    break;
-                case WEST: // On a west-facing wall (entity is facing east)
-                    poseStack.mulPose(Vector3f.ZP.rotationDegrees(90.0F));
-                    break;
-                case EAST: // On an east-facing wall (entity is facing west)
-                    poseStack.mulPose(Vector3f.ZP.rotationDegrees(-90.0F));
-                    break;
-                default:
-                    break;
-            }
+            applyAttachmentRotation(poseStack, attachment);
             poseStack.translate(0.0D, -entity.getBbHeight() / 2.0, 0.0D);
         }
 
@@ -73,5 +53,19 @@ public class GroundSpiderRenderer extends GeoEntityRenderer<GroundSpiderEntity> 
 
         // Restore the matrix to its original state
         poseStack.popPose();
+    }
+
+    private static void applyAttachmentRotation(PoseStack poseStack, Direction attachment) {
+        float degrees = GroundSpiderAttachmentPose.rotationDegrees(attachment);
+        switch (GroundSpiderAttachmentPose.rotationAxis(attachment)) {
+            case X:
+                poseStack.mulPose(Vector3f.XP.rotationDegrees(degrees));
+                break;
+            case Z:
+                poseStack.mulPose(Vector3f.ZP.rotationDegrees(degrees));
+                break;
+            default:
+                break;
+        }
     }
 }

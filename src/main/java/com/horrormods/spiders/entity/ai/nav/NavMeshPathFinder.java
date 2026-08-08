@@ -3,6 +3,7 @@ package com.horrormods.spiders.entity.ai.nav;
 import com.horrormods.spiders.entity.GroundSpiderEntity;
 import com.horrormods.spiders.entity.ai.ClimberNodeEvaluator;
 import com.horrormods.spiders.entity.ai.ThetaStar;
+import com.horrormods.spiders.entity.util.AttachmentHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.ChunkPos;
@@ -18,8 +19,6 @@ import net.minecraft.util.Mth;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Demonstrates pathfinding on top of a navigation mesh. The current
@@ -33,7 +32,6 @@ public class NavMeshPathFinder {
 
     private final NavMeshManager manager = new NavMeshManager();
     private final Level level;
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
 
     public NavMeshPathFinder(Level level) {
         this.level = level;
@@ -48,9 +46,9 @@ public class NavMeshPathFinder {
         manager.tick(centre, 2);
     }
 
-    /** Asynchronous variant used by the navigator to avoid blocking the game thread. */
+    /** Compatibility variant for navigator call sites; world reads stay on the server thread. */
     public CompletableFuture<Path> findPathAsync(GroundSpiderEntity spider, Vec3 start, BlockPos goal) {
-        return CompletableFuture.supplyAsync(() -> findPath(spider, start, goal), executor);
+        return CompletableFuture.completedFuture(findPath(spider, start, goal));
     }
 
     /**
@@ -72,9 +70,10 @@ public class NavMeshPathFinder {
 
         if (ThetaStar.hasSurfaceLineOfSight(spider, level, eval, start, goalCenter)) {
             List<Node> nodes = new ArrayList<>();
-            ClimberNodeEvaluator.CustomNode startNode = makeNode(eval, start);
-            ClimberNodeEvaluator.CustomNode goalNode = makeNode(eval, goalCenter);
+            ClimberNodeEvaluator.CustomNode startNode = makeNode(spider, eval, start, spider.getAttachmentDirection());
+            ClimberNodeEvaluator.CustomNode goalNode = makeNode(spider, eval, goalCenter);
             if (startNode == null || goalNode == null) return null;
+            if (startNode.attachment != goalNode.attachment) return null;
             nodes.add(startNode);
             nodes.add(goalNode);
             return new Path(nodes, goal, true);
@@ -156,7 +155,7 @@ public class NavMeshPathFinder {
         if (goalRec == null) return null;
 
         List<Node> nodes = new ArrayList<>();
-        ClimberNodeEvaluator.CustomNode startNode = makeNode(eval, start);
+        ClimberNodeEvaluator.CustomNode startNode = makeNode(spider, eval, start, spider.getAttachmentDirection());
         if (startNode == null) return null;
         nodes.add(startNode);
 
@@ -173,14 +172,18 @@ public class NavMeshPathFinder {
             pn.pz = p.centre.z;
             nodes.add(pn);
         }
-        ClimberNodeEvaluator.CustomNode goalNode = makeNode(eval, goalCenter);
+        ClimberNodeEvaluator.CustomNode goalNode = makeNode(spider, eval, goalCenter);
         if (goalNode == null) return null;
         nodes.add(goalNode);
 
         return new Path(nodes, goal, true);
     }
 
-    private static ClimberNodeEvaluator.CustomNode makeNode(ClimberNodeEvaluator eval, Vec3 vec) {
+    private static ClimberNodeEvaluator.CustomNode makeNode(GroundSpiderEntity spider, ClimberNodeEvaluator eval, Vec3 vec) {
+        return makeNode(spider, eval, vec, null);
+    }
+
+    private static ClimberNodeEvaluator.CustomNode makeNode(GroundSpiderEntity spider, ClimberNodeEvaluator eval, Vec3 vec, Direction preferred) {
         BlockPos pos = new BlockPos(Mth.floor(vec.x), Mth.floor(vec.y), Mth.floor(vec.z));
         EnumSet<Direction> dirs = eval.findAttachments(pos);
         if (dirs.isEmpty()) return null;
@@ -189,7 +192,9 @@ public class NavMeshPathFinder {
                 vec.y - (pos.getY() + 0.5),
                 vec.z - (pos.getZ() + 0.5));
         Direction a = null;
-        if (dirs.contains(guess) && eval.isPositionValidWithAttachment(pos, guess)) {
+        if (preferred != null && dirs.contains(preferred) && eval.isPositionValidWithAttachment(pos, preferred)) {
+            a = preferred;
+        } else if (dirs.contains(guess) && eval.isPositionValidWithAttachment(pos, guess)) {
             a = guess;
         } else {
             for (Direction d : dirs) {
@@ -201,9 +206,10 @@ public class NavMeshPathFinder {
         }
         if (a == null) return null;
         ClimberNodeEvaluator.CustomNode node = (ClimberNodeEvaluator.CustomNode) eval.getNode(pos, a);
-        node.px = vec.x;
-        node.py = vec.y;
-        node.pz = vec.z;
+        Vec3 anchor = AttachmentHelper.anchorFor(spider, pos, a);
+        node.px = anchor.x;
+        node.py = anchor.y;
+        node.pz = anchor.z;
         return node;
     }
 
