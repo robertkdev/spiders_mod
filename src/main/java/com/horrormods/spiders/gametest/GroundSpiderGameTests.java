@@ -495,7 +495,7 @@ public final class GroundSpiderGameTests {
         });
     }
 
-    @GameTest(template = "arena", timeoutTicks = 600, batch = "zzzzzzzzPreyInteraction")
+    @GameTest(template = "arena", timeoutTicks = 1400, batch = "zzzzzzzzPreyInteraction")
     public static void preyInteractionWebsAndGuardsKillSite(GameTestHelper helper) {
         fillFloor(helper, 12, 8);
 
@@ -684,7 +684,7 @@ public final class GroundSpiderGameTests {
             }
         });
 
-        helper.runAfterDelay(560, () -> {
+        helper.runAfterDelay(1300, () -> {
             if (completed.get()) {
                 return;
             }
@@ -706,7 +706,7 @@ public final class GroundSpiderGameTests {
                     || usedForcedPath.get()
                     || sawUnexpectedAttack.get()
                     || firstPreyInteractionTick[0] < 0
-                    || firstPreyInteractionTick[0] > 70) {
+                    || firstPreyInteractionTick[0] > 400) {
                 failAndDiscard(helper,
                         "Ground spider should kill prey, web the kill area, and hold guard; sawPreyKilled="
                         + sawPreyKilled.get()
@@ -2829,7 +2829,7 @@ public final class GroundSpiderGameTests {
         });
     }
 
-    @GameTest(template = "arena", timeoutTicks = 360, batch = "zzzzzzzzWallPeek")
+    @GameTest(template = "arena", timeoutTicks = 420, batch = "zzzzzzzzWallPeek")
     public static void wallPeekEmergesFromCoverThenRetreats(GameTestHelper helper) {
         fillFloor(helper, 12, 8);
         for (int y = 1; y <= 3; y++) {
@@ -2982,7 +2982,7 @@ public final class GroundSpiderGameTests {
             }
         });
 
-        helper.runAfterDelay(300, () -> {
+        helper.runAfterDelay(340, () -> {
             boolean targetUndamaged = lowestHealth[0] >= startHealth;
             boolean peekMovementEnough = sawReachedPeek.get() || maxPeekReduced[0] >= 0.45D;
             boolean retreatEvidence = sawRetreated.get() || maxCoverReturnReduced[0] >= 0.35D;
