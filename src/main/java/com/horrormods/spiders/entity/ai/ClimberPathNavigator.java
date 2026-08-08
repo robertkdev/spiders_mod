@@ -44,6 +44,7 @@ public class ClimberPathNavigator extends GroundPathNavigation {
     private static final int DENSE_PLAYER_REPATH_STAGGER_TICKS = 16;
     private static final double ENTITY_REPATH_DISTANCE_SQR = 4.0D;
     private static final int DIRECT_SAME_SURFACE_THETA_STAR_LIMIT = 96;
+    private static final int BLOCK_TARGET_THETA_STAR_LIMIT = 512;
     private static final int ENTITY_MOVE_REQUEST_REUSE_TICKS = 14;
     private static final int ENTITY_MOVE_REQUEST_FAILURE_BACKOFF_TICKS = 18;
     private static final double ENTITY_MOVE_REQUEST_STABLE_DISTANCE_SQR = 1.0D;
@@ -153,7 +154,8 @@ public class ClimberPathNavigator extends GroundPathNavigation {
             Vec3 start = this.getTempMobPos();
             List<BlockPos> sortedTargets = new ArrayList<>(positions);
             sortedTargets.sort(Comparator.comparingDouble(pos -> Vec3.atCenterOf(pos).distanceToSqr(start)));
-            return chooseBestPathToTargets(spider, start, sortedTargets, -1, true, null);
+            return chooseBestPathToTargets(spider, start, sortedTargets,
+                    BLOCK_TARGET_THETA_STAR_LIMIT, true, null);
         }
         return null;
     }

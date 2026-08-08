@@ -4511,7 +4511,7 @@ public class GroundSpiderEntity extends Monster implements IAnimatable, IClimber
         if (this.darknessPreferenceRepathTicks > 0) {
             this.darknessPreferenceRepathTicks--;
         }
-        if (this.darknessPreferenceRepathTicks <= 0 || this.getNavigation().isDone()) {
+        if (this.darknessPreferenceRepathTicks <= 0) {
             Path path = this.getNavigation().createPath(this.darknessPreferenceAnchor, 0);
             if (path != null) {
                 boolean started = this.getNavigation().moveTo(path, DARKNESS_PREFERENCE_NAVIGATION_SPEED);
